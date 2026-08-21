@@ -29,12 +29,18 @@ if DATABASE_URL.startswith("postgres://"):
 IS_POSTGRES = bool(DATABASE_URL and PSYCOPG2_AVAILABLE)
 
 pg_pool: Optional[Any] = None
-if IS_POSTGRES:
-    try:
-        pg_pool = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
-    except Exception as e:
-        print(f"Warning: Failed to connect to PostgreSQL ({e}). Falling back to SQLite.")
-        IS_POSTGRES = False
+
+
+def get_pg_pool():
+    global pg_pool, IS_POSTGRES
+    if pg_pool is None and IS_POSTGRES:
+        try:
+            from psycopg2.pool import ThreadedConnectionPool
+            pg_pool = ThreadedConnectionPool(1, 20, DATABASE_URL)
+        except Exception as e:
+            print(f"Warning: Failed to connect to PostgreSQL ({e}). Falling back to SQLite.")
+            IS_POSTGRES = False
+    return pg_pool
 
 
 class DBWrapper:
@@ -42,10 +48,16 @@ class DBWrapper:
     def __init__(self):
         self.is_postgres = IS_POSTGRES
         if self.is_postgres:
-            assert pg_pool is not None
-            self.conn = pg_pool.getconn()
-            self.conn.autocommit = False
-            self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
+            p = get_pg_pool()
+            if p:
+                self.conn = p.getconn()
+                self.conn.autocommit = False
+                self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
+            else:
+                self.is_postgres = False
+                self.conn = sqlite3.connect(str(SQLITE_DB_PATH), detect_types=sqlite3.PARSE_DECLTYPES)
+                self.conn.row_factory = sqlite3.Row
+                self.cursor = self.conn.cursor()
         else:
             self.conn = sqlite3.connect(str(SQLITE_DB_PATH), detect_types=sqlite3.PARSE_DECLTYPES)
             self.conn.row_factory = sqlite3.Row
@@ -54,8 +66,6 @@ class DBWrapper:
     def _format_sql(self, sql: str) -> str:
         """Convert '?' to '%s' if running against PostgreSQL."""
         if self.is_postgres:
-            # Replace '?' parameter placeholder with '%s'
-            # (assuming '?' is not inside string literals)
             return sql.replace("?", "%s")
         return sql
 
@@ -96,7 +106,7 @@ class DBWrapper:
                 pg_pool.putconn(self.conn)
             except Exception:
                 pass
-        else:
+        elif hasattr(self, 'conn') and self.conn is not None:
             try:
                 self.conn.close()
             except Exception:
@@ -191,89 +201,103 @@ def init_db():
             )
         """)
 
+        db.commit()
+
         # Create indexes
         try:
             db.execute("CREATE INDEX IF NOT EXISTS idx_part_event_reg ON participants(event_id, reg_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_scanners_event ON scanners(event_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_logs_event_scan ON attendance_logs(event_id, scan_id)")
+            db.commit()
         except Exception:
-            pass
-
-        db.commit()
+            db.rollback()
 
         # 6. Legacy Data Auto-Migration
         _migrate_legacy_data(db)
 
+    except Exception as e:
+        db.rollback()
+        raise e
     finally:
         db.close()
 
 
 def _migrate_legacy_data(db: DBWrapper):
     """Migrate legacy 'roster' table into the 'events' & 'participants' schema if present."""
-    # Check if any event exists
-    row = db.fetchone("SELECT COUNT(*) as cnt FROM events")
-    event_count = row["cnt"] if row else 0
+    try:
+        # Check if any event exists
+        row = db.fetchone("SELECT COUNT(*) as cnt FROM events")
+        event_count = row["cnt"] if row else 0
 
-    if event_count == 0:
-        default_event_id = "default-event"
-        created_at = now_utc_iso()
-        
-        # Read legacy extra headers if present in settings
-        setting_row = db.fetchone("SELECT value FROM settings WHERE key = ?", ("extra_headers",))
-        extra_headers_json = setting_row["value"] if setting_row and setting_row["value"] else "[]"
-        
-        # Create default event
-        db.execute("""
-            INSERT INTO events (id, name, code, access_code, id_prefix, id_width, extra_headers_json, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            default_event_id,
-            "Aazhi CTF 2026",
-            "AAZHI26",
-            "SCAN123",
-            "",
-            3,
-            extra_headers_json,
-            "active",
-            created_at
-        ))
-        db.commit()
-
-        # Check if legacy 'roster' table exists
-        has_roster = False
-        try:
-            if not db.is_postgres:
-                r = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='roster'")
-                has_roster = bool(r)
-            else:
-                r = db.fetchone("SELECT table_name FROM information_schema.tables WHERE table_name='roster'")
-                has_roster = bool(r)
-        except Exception:
-            pass
-
-        if has_roster:
+        if event_count == 0:
+            default_event_id = "default-event"
+            created_at = now_utc_iso()
+            
+            # Read legacy extra headers if present in settings
+            extra_headers_json = "[]"
             try:
-                roster_rows = db.fetchall("SELECT * FROM roster")
-                for r in roster_rows:
-                    p_id = str(uuid.uuid4())
-                    db.execute("""
-                        INSERT INTO participants (
-                            id, event_id, reg_id, name, email, department, extra_json, attended, scanned_at, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT DO NOTHING
-                    """, (
-                        p_id,
-                        default_event_id,
-                        r["reg_id"],
-                        r["name"],
-                        r["email"],
-                        r["department"],
-                        r.get("extra_json"),
-                        r.get("attended", 0),
-                        r.get("scanned_at"),
-                        created_at
-                    ))
-                db.commit()
-            except Exception as e:
-                print(f"Legacy migration note: {e}")
-                db.rollback()
+                setting_row = db.fetchone("SELECT value FROM settings WHERE key = ?", ("extra_headers",))
+                if setting_row and setting_row.get("value"):
+                    extra_headers_json = setting_row["value"]
+            except Exception:
+                pass
+            
+            # Create default event
+            db.execute("""
+                INSERT INTO events (id, name, code, access_code, id_prefix, id_width, extra_headers_json, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+            """, (
+                default_event_id,
+                "Aazhi CTF 2026",
+                "AAZHI26",
+                "SCAN123",
+                "",
+                3,
+                extra_headers_json,
+                "active",
+                created_at
+            ))
+            db.commit()
+
+            # Check if legacy 'roster' table exists
+            has_roster = False
+            try:
+                if not db.is_postgres:
+                    r = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='roster'")
+                    has_roster = bool(r)
+                else:
+                    r = db.fetchone("SELECT table_name FROM information_schema.tables WHERE table_name='roster' AND table_schema='public'")
+                    has_roster = bool(r)
+            except Exception:
+                pass
+
+            if has_roster:
+                try:
+                    roster_rows = db.fetchall("SELECT * FROM roster")
+                    for r in roster_rows:
+                        p_id = str(uuid.uuid4())
+                        db.execute("""
+                            INSERT INTO participants (
+                                id, event_id, reg_id, name, email, department, extra_json, attended, scanned_at, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT DO NOTHING
+                        """, (
+                            p_id,
+                            default_event_id,
+                            r["reg_id"],
+                            r["name"],
+                            r["email"],
+                            r["department"],
+                            r.get("extra_json"),
+                            r.get("attended", 0),
+                            r.get("scanned_at"),
+                            created_at
+                        ))
+                    db.commit()
+                except Exception as e:
+                    print(f"Legacy migration note: {e}")
+                    db.rollback()
+    except Exception as e:
+        print(f"Migration note: {e}")
+        db.rollback()

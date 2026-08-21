@@ -49,6 +49,12 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"csv", "xlsx"}
 
+# Initialize database schema and migrations on startup (works with Gunicorn & local)
+try:
+    db.init_db()
+except Exception as _init_err:
+    print(f"Warning during startup db.init_db(): {_init_err}")
+
 
 @app.after_request
 def add_cors_and_security_headers(response):
@@ -119,6 +125,7 @@ def get_default_or_active_event_id() -> str:
     database.execute("""
         INSERT INTO events (id, name, code, access_code, id_prefix, id_width, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT DO NOTHING
     """, (default_id, "Aazhi CTF 2026", "AAZHI26", "SCAN123", "", 3, "active", now_utc_iso()))
     database.commit()
     session["active_event_id"] = default_id
