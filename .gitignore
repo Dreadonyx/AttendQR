@@ -1,0 +1,33 @@
+# Python
+attendqr.db
+__pycache__/
+*.pyc
+*.pyo
+uploads/
+*.egg-info/
+.venv/
+venv/
+env/
+instance/
+
+# Android build artifacts
+android-sdk/
+android-build/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.class
+*.dex
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+test_qrs/
+AttendQR_source.zip

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AttendQR — Upload Registration Sheet</title>
+  <meta name="description" content="Upload your Google Form response sheet to generate a QR-coded attendance roster." />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="{{ url_for('index') }}" class="nav-brand">
+      <span class="brand-icon">📋</span> AttendQR Cloud
+    </a>
+    <div class="nav-links">
+      <a href="{{ url_for('index') }}" class="active">Upload</a>
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('scan') }}">Scanner</a>
+      <a href="{{ url_for('download_apk') }}" class="btn btn-outline btn-sm" style="margin-left:0.5rem;">📱 Download APK</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container">
+  <div class="page-header">
+    <h1>Upload Registration Sheet</h1>
+    <p>Import your Google Form CSV or XLSX export into an event roster.</p>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul class="flash-list">
+        {% for category, message in messages %}
+          <li class="flash flash-{{ category }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <div class="card">
+    <div class="card-title">📂 Select Target Event &amp; File</div>
+
+    <form id="upload-form" method="POST" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+      
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label class="form-label" for="target_event_id">🎯 Target Event</label>
+        <select id="target_event_id" name="target_event_id" class="form-select">
+          {% for ev in events %}
+            <option value="{{ ev['id'] }}" {% if active_event_id == ev['id'] %}selected{% endif %}>
+              {{ ev['name'] }} (Code: {{ ev['code'] }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="sheet-input" name="sheet" accept=".csv,.xlsx" required />
+        <div class="drop-icon">📊</div>
+        <div class="drop-title">Drag & drop or click to browse</div>
+        <div class="drop-hint">Accepted formats: .csv or .xlsx (Google Form export)</div>
+        <div class="file-selected-name" id="file-name-display" style="display:none;"></div>
+      </div>
+
+      <div class="mt-3">
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="upload-btn">
+          ⬆️ Upload &amp; Continue to Column Mapping
+        </button>
+      </div>
+    </form>
+  </div>
+
+  {% if roster_count > 0 %}
+  <div class="card">
+    <div class="card-title">ℹ️ Existing Event Roster</div>
+    <p class="text-muted">
+      This event already has <strong style="color:var(--text)">{{ roster_count }}</strong> registered participants.
+      Uploading a new sheet for this event will <strong style="color:var(--danger)">replace</strong> its roster. (Other events are untouched).
+    </p>
+    <div class="flex gap-2 flex-wrap mt-2">
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline btn-sm">View Live Dashboard</a>
+      <a href="{{ url_for('scan') }}" class="btn btn-outline btn-sm">Open Scanner</a>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-title">📖 Quick Guide</div>
+    <ol style="padding-left:1.3rem; color:var(--text-muted); font-size:.9rem; line-height:2;">
+      <li>Export your Google Form responses as <strong style="color:var(--text)">CSV</strong> or <strong style="color:var(--text)">XLSX</strong>.</li>
+      <li>Upload the file here — original row order is preserved (= timestamp order).</li>
+      <li>Map the columns: choose Name, Email, Department, custom ID prefix, and extra columns.</li>
+      <li>Download the QR ZIP and distribute QR passes to participants.</li>
+      <li>On event day, volunteers open the <strong style="color:var(--text)">AttendQR Mobile App / Scanner</strong> with the Event Code to scan attendees in simultaneously.</li>
+      <li>Track real-time multi-device attendance on the <strong style="color:var(--text)">Dashboard</strong> and export final CSVs.</li>
+    </ol>
+  </div>
+</main>
+
+<script>
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('sheet-input');
+  const nameDisplay = document.getElementById('file-name-display');
+  const uploadBtn = document.getElementById('upload-btn');
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) {
+      nameDisplay.textContent = '✅ ' + fileInput.files[0].name;
+      nameDisplay.style.display = '';
+    }
+  });
+
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      fileInput.files = e.dataTransfer.files;
+      nameDisplay.textContent = '✅ ' + e.dataTransfer.files[0].name;
+      nameDisplay.style.display = '';
+    }
+  });
+
+  document.getElementById('upload-form').addEventListener('submit', () => {
+    uploadBtn.textContent = '⏳ Uploading…';
+    uploadBtn.disabled = true;
+  });
+</script>
+
+</body>
+</html>

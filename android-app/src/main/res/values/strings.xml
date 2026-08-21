@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">AttendQR</string>
+    <string name="server_settings">Server Settings</string>
+    <string name="change_url">Change Server URL</string>
+</resources>

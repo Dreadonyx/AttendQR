@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>AttendQR — Multi-Device Mobile Scanner</title>
+  <meta name="description" content="Cloud-first mobile QR attendance scanner with offline queue and auto-sync." />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}" />
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon-192.png') }}" />
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <style>
+    :root {
+      --sat: env(safe-area-inset-top, 0px);
+      --sab: env(safe-area-inset-bottom, 0px);
+      --sal: env(safe-area-inset-left, 0px);
+      --sar: env(safe-area-inset-right, 0px);
+    }
+
+    body {
+      overflow-x: hidden;
+      background: #0d1117;
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      padding-top: var(--sat);
+      padding-bottom: var(--sab);
+    }
+
+    .scanner-page {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 0.75rem 1rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.25rem;
+    }
+
+    .app-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .icon-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 8px;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      transition: all 0.15s;
+    }
+
+    .icon-btn:hover, .icon-btn:active {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(88,166,255,0.08);
+    }
+
+    .viewfinder-wrap {
+      position: relative;
+      width: 100%;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #000;
+      border: 2px solid var(--border);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+      aspect-ratio: 1 / 1;
+      max-height: 380px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #reader {
+      width: 100% !important;
+      height: 100% !important;
+      border: none !important;
+    }
+
+    #reader video {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      border-radius: 14px;
+    }
+
+    .scanner-laser {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), var(--accent), transparent);
+      box-shadow: 0 0 12px var(--accent);
+      top: 20%;
+      z-index: 10;
+      pointer-events: none;
+      animation: scanLaser 2.2s ease-in-out infinite alternate;
+    }
+
+    @keyframes scanLaser {
+      0%   { top: 15%; opacity: 0.4; }
+      50%  { opacity: 1; }
+      100% { top: 85%; opacity: 0.4; }
+    }
+
+    .camera-controls {
+      display: flex;
+      justify-content: center;
+      gap: 0.6rem;
+    }
+
+    .scan-result-card {
+      border-radius: 14px;
+      padding: 1.15rem 1rem;
+      text-align: center;
+      display: none;
+      animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(12px) scale(0.98); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .scan-result-card.visible { display: block; }
+
+    .result-ok {
+      background: rgba(63, 185, 80, 0.16);
+      border: 2px solid var(--success);
+      color: #7ee787;
+    }
+
+    .result-dup {
+      background: rgba(210, 153, 34, 0.16);
+      border: 2px solid var(--warning);
+      color: #e3b341;
+    }
+
+    .result-err {
+      background: rgba(248, 81, 73, 0.16);
+      border: 2px solid var(--danger);
+      color: #ff7b72;
+    }
+
+    .result-badge {
+      font-size: 2.2rem;
+      line-height: 1;
+      margin-bottom: 0.3rem;
+    }
+
+    .result-name {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.2px;
+    }
+
+    .result-dept {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+
+    .result-msg {
+      font-size: 0.85rem;
+      margin-top: 0.35rem;
+      font-weight: 500;
+    }
+
+    .stats-pill {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.65rem 1rem;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+    }
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.1rem;
+    }
+
+    .stat-num {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      align-self: center;
+      background: var(--bg-card);
+      padding: 0.25rem 0.65rem;
+      border-radius: 99px;
+      border: 1px solid var(--border);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    .dot.busy { background: var(--warning); animation: pulse 1s infinite; }
+    .dot.offline { background: var(--warning); }
+    .dot.error { background: var(--danger); }
+
+    .recent-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+    }
+
+    .recent-header {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .recent-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+
+    .recent-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      padding: 0.35rem 0;
+      border-bottom: 1px solid rgba(48,54,61,0.5);
+    }
+
+    .recent-item:last-child { border-bottom: none; }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 1rem;
+    }
+
+    .modal-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 360px;
+      padding: 1.35rem;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+    }
+
+    .offline-banner {
+      background: rgba(210,153,34,0.15);
+      border: 1px solid rgba(210,153,34,0.4);
+      color: var(--warning);
+      border-radius: 8px;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.78rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+<div class="scanner-page">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="app-title">
+      <span>📷</span> AttendQR
+    </div>
+    <div class="header-actions">
+      <button type="button" class="icon-btn" id="btn-device-settings" title="Scanner Settings">
+        ⚙️ <span id="hdr-device-name">Scanner-01</span>
+      </button>
+      <button type="button" class="icon-btn" id="btn-manual" title="Manual ID entry">
+        ⌨️
+      </button>
+      <a href="{{ url_for('dashboard') }}" class="icon-btn" title="View Dashboard">
+        📊
+      </a>
+    </div>
+  </header>
+
+  <!-- Status indicator -->
+  <div class="status-badge" id="status-badge">
+    <span class="dot" id="status-dot"></span>
+    <span id="status-text">Ready &bull; Connected</span>
+  </div>
+
+  <!-- Offline Pending Queue Banner -->
+  <div class="offline-banner" id="offline-banner" style="display:none;">
+    <span id="offline-banner-text">🟠 0 scans pending sync</span>
+    <button type="button" class="btn btn-outline btn-sm" style="padding:0.15rem 0.45rem;font-size:0.7rem;" onclick="flushOfflineQueue()">Sync Now</button>
+  </div>
+
+  <!-- Camera Viewfinder -->
+  <div class="viewfinder-wrap" id="viewfinder">
+    <div id="reader"></div>
+    <div class="scanner-laser" id="laser"></div>
+  </div>
+
+  <!-- Camera Action Buttons -->
+  <div class="camera-controls">
+    <button type="button" class="icon-btn" id="btn-flip" title="Switch Camera">
+      🔄 Flip Camera
+    </button>
+  </div>
+
+  <!-- Scan Result Banner -->
+  <div class="scan-result-card" id="result-card">
+    <div class="result-badge" id="res-icon">✅</div>
+    <div class="result-name" id="res-name">Participant Name</div>
+    <div class="result-dept" id="res-dept">Department</div>
+    <div class="result-msg" id="res-msg">Checked in successfully</div>
+  </div>
+
+  <!-- Stats Counter Pill -->
+  <div class="stats-pill">
+    <div class="stat-item">
+      <span class="stat-num" style="color:var(--success)" id="cnt-ok">0</span>
+      <span class="stat-label">Checked In</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num" style="color:var(--warning)" id="cnt-dup">0</span>
+      <span class="stat-label">Duplicates</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num" style="color:var(--danger)" id="cnt-err">0</span>
+      <span class="stat-label">Unknown</span>
+    </div>
+  </div>
+
+  <!-- Recent Scans Section -->
+  <div class="recent-section">
+    <div class="recent-header">
+      <span>Recent Scans</span>
+      <span id="recent-count">0 recorded</span>
+    </div>
+    <div class="recent-list" id="recent-list">
+      <div style="color:var(--text-dim);font-size:0.8rem;text-align:center;padding:0.5rem;">
+        No scans in this session yet
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Device Settings / Login Modal -->
+<div class="modal-backdrop" id="modal-device" style="display:none;">
+  <div class="modal-card">
+    <h3 style="margin-bottom:0.4rem;font-size:1.1rem;">⚙️ Scanner Phone Setup</h3>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:1rem;">
+      Connect this scanner phone to the central cloud server.
+    </p>
+    <form id="form-device">
+      <div class="form-group" style="margin-bottom:0.65rem;">
+        <label class="form-label" style="font-size:0.7rem;">Event Code</label>
+        <input type="text" id="cfg-event-code" class="form-control" placeholder="e.g. AAZHI26" value="{{ active_event['code'] if active_event else 'AAZHI26' }}" required style="font-family:monospace;text-transform:uppercase;" />
+      </div>
+      <div class="form-group" style="margin-bottom:0.65rem;">
+        <label class="form-label" style="font-size:0.7rem;">Scanner Access Code</label>
+        <input type="text" id="cfg-access-code" class="form-control" placeholder="e.g. SCAN123" value="{{ active_event['access_code'] if active_event else 'SCAN123' }}" required />
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label class="form-label" style="font-size:0.7rem;">Device Identifier</label>
+        <input type="text" id="cfg-device-name" class="form-control" placeholder="e.g. Scanner-01, Gate-A" required />
+      </div>
+      <div style="display:flex;gap:0.5rem;">
+        <button type="button" class="btn btn-ghost" style="flex:1" id="btn-close-device">Cancel</button>
+        <button type="submit" class="btn btn-primary" style="flex:1">Connect</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Manual ID Entry Modal -->
+<div class="modal-backdrop" id="modal-manual" style="display:none;">
+  <div class="modal-card">
+    <h3 style="margin-bottom:0.4rem;font-size:1.1rem;">⌨️ Manual ID Check-In</h3>
+    <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;">
+      Enter the participant's Registration ID:
+    </p>
+    <form id="form-manual">
+      <div class="form-group" style="margin-bottom:1rem;">
+        <input
+          type="text"
+          id="manual-id-input"
+          class="form-control"
+          placeholder="e.g. AAZHI-001"
+          style="font-size:1.15rem;text-align:center;letter-spacing:1.5px;padding:0.75rem;font-family:monospace;"
+          autocomplete="off"
+          required
+        />
+      </div>
+      <div style="display:flex;gap:0.5rem;">
+        <button type="button" class="btn btn-outline" style="flex:1" id="btn-close-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary" style="flex:1">Submit</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Audio Feedback Helper -->
+<script src="{{ url_for('static', filename='audio.js') }}"></script>
+<!-- html5-qrcode library from CDN -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+<script>
+  const ACTIVE_EVENT_ID = "{{ active_event['id'] if active_event else 'default-event' }}";
+  const QUEUE_KEY = 'attendqr_web_offline_queue_' + ACTIVE_EVENT_ID;
+  const TOKEN_KEY = 'attendqr_scanner_token_' + ACTIVE_EVENT_ID;
+  const DEVICE_NAME_KEY = 'attendqr_device_name';
+  const DEVICE_ID_KEY = 'attendqr_device_id';
+
+  let processingLock = false;
+  let counts = { ok: 0, dup: 0, err: 0 };
+  let recentScans = [];
+  let html5QrCode = null;
+  let currentFacingMode = "environment";
+  let scannerToken = localStorage.getItem(TOKEN_KEY) || '';
+  let deviceName = localStorage.getItem(DEVICE_NAME_KEY) || 'Scanner-01';
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY) || ('dev_' + Math.random().toString(36).substr(2, 9));
+
+  localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  localStorage.setItem(DEVICE_NAME_KEY, deviceName);
+  document.getElementById('hdr-device-name').textContent = deviceName;
+  document.getElementById('cfg-device-name').value = deviceName;
+
+  const statusDot   = document.getElementById('status-dot');
+  const statusText  = document.getElementById('status-text');
+  const resultCard  = document.getElementById('result-card');
+  const resIcon     = document.getElementById('res-icon');
+  const resName     = document.getElementById('res-name');
+  const resDept     = document.getElementById('res-dept');
+  const resMsg      = document.getElementById('res-msg');
+  const laser       = document.getElementById('laser');
+  const recentList  = document.getElementById('recent-list');
+  const recentCount = document.getElementById('recent-count');
+
+  function setStatus(msg, state = 'ready') {
+    statusText.textContent = msg;
+    statusDot.className = 'dot' + (state === 'busy' ? ' busy' : (state === 'offline' ? ' offline' : (state === 'error' ? ' error' : '')));
+    laser.style.display = (state === 'ready') ? 'block' : 'none';
+  }
+
+  function getOfflineQueue() {
+    try {
+      return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveOfflineQueue(queue) {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    updateQueueUI();
+  }
+
+  function updateQueueUI() {
+    const q = getOfflineQueue();
+    const banner = document.getElementById('offline-banner');
+    const bannerText = document.getElementById('offline-banner-text');
+    if (q.length > 0) {
+      banner.style.display = 'flex';
+      bannerText.textContent = `🟠 Offline — ${q.length} scan${q.length === 1 ? '' : 's'} pending sync`;
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  function showResult(type, icon, name, dept, msg, id) {
+    resultCard.className = 'scan-result-card visible ' + (type === 'ok' ? 'result-ok' : (type === 'duplicate' ? 'result-dup' : 'result-err'));
+    resIcon.textContent = icon;
+    resName.textContent = name || 'Unknown ID';
+    resDept.textContent = dept || '';
+    resMsg.textContent  = msg || '';
+
+    if (navigator.vibrate) {
+      if (type === 'ok') navigator.vibrate(100);
+      else if (type === 'duplicate') navigator.vibrate([80, 50, 80]);
+      else navigator.vibrate(250);
+    }
+
+    playBeep(type);
+
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    recentScans.unshift({ type, name: name || id, time: timeStr });
+    if (recentScans.length > 8) recentScans.pop();
+    renderRecent();
+  }
+
+  function hideResult() {
+    resultCard.className = 'scan-result-card';
+  }
+
+  function renderRecent() {
+    recentCount.textContent = recentScans.length + ' recorded';
+    if (!recentScans.length) return;
+    recentList.innerHTML = recentScans.map(s => `
+      <div class="recent-item">
+        <span>${s.type === 'ok' ? '✅' : (s.type === 'duplicate' ? '⚠️' : '❌')} <strong>${esc(s.name)}</strong></span>
+        <span style="color:var(--text-dim);font-size:0.75rem;">${s.time}</span>
+      </div>
+    `).join('');
+  }
+
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  async function processRegId(rawId) {
+    if (processingLock) return;
+    processingLock = true;
+    setStatus('Verifying roster…', 'busy');
+
+    const regId = String(rawId).trim();
+    const scanId = 'scan_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    const nowIso = new Date().toISOString();
+
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Bypass-Tunnel-Reminder': 'true'
+      };
+      if (scannerToken) headers['Authorization'] = 'Bearer ' + scannerToken;
+
+      const res = await fetch(`/api/events/${ACTIVE_EVENT_ID}/scan`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          reg_id: regId,
+          scan_id: scanId,
+          scanned_at: nowIso,
+          device_id: deviceId,
+          device_name: deviceName
+        }),
+      });
+
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+
+      if (data.status === 'ok') {
+        counts.ok++;
+        document.getElementById('cnt-ok').textContent = counts.ok;
+        showResult('ok', '✅', data.name, data.department, `✓ Checked in (${regId})`, regId);
+      } else if (data.status === 'duplicate') {
+        counts.dup++;
+        document.getElementById('cnt-dup').textContent = counts.dup;
+        showResult('duplicate', '⚠️', data.name, data.department, `Already present (by ${data.scanner || 'scanner'})`, regId);
+      } else {
+        counts.err++;
+        document.getElementById('cnt-err').textContent = counts.err;
+        showResult('notfound', '❌', regId, '', 'Not found in event roster', regId);
+      }
+
+      setStatus('Ready &bull; Connected', 'ready');
+      // If we are online, check if any pending queue needs syncing
+      flushOfflineQueue();
+
+    } catch (e) {
+      // Offline fallback: store in persistent queue
+      const queue = getOfflineQueue();
+      queue.push({ scan_id: scanId, reg_id: regId, scanned_at: nowIso });
+      saveOfflineQueue(queue);
+
+      counts.ok++;
+      document.getElementById('cnt-ok').textContent = counts.ok;
+      showResult('ok', '🟠', `ID: ${regId}`, '', 'Queued locally (Offline)', regId);
+      setStatus('Offline &bull; Queueing', 'offline');
+    }
+
+    setTimeout(() => {
+      hideResult();
+      processingLock = false;
+      const q = getOfflineQueue();
+      if (q.length > 0) setStatus('Offline &bull; Queueing', 'offline');
+      else setStatus('Ready &bull; Connected', 'ready');
+    }, 1600);
+  }
+
+  async function flushOfflineQueue() {
+    const queue = getOfflineQueue();
+    if (!queue.length) return;
+
+    try {
+      const headers = { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' };
+      if (scannerToken) headers['Authorization'] = 'Bearer ' + scannerToken;
+
+      const res = await fetch(`/api/events/${ACTIVE_EVENT_ID}/sync`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          device_id: deviceId,
+          device_name: deviceName,
+          scans: queue
+        })
+      });
+
+      if (res.ok) {
+        saveOfflineQueue([]);
+        setStatus('Ready &bull; Connected', 'ready');
+      }
+    } catch (e) {
+      console.log('Sync retry delayed, device still offline');
+    }
+  }
+
+  // Heartbeat loop
+  setInterval(async () => {
+    if (!scannerToken) return;
+    const q = getOfflineQueue();
+    try {
+      await fetch(`/api/events/${ACTIVE_EVENT_ID}/heartbeat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + scannerToken,
+          'Bypass-Tunnel-Reminder': 'true'
+        },
+        body: JSON.stringify({ pending_count: q.length, status: 'online' })
+      });
+      if (q.length > 0) flushOfflineQueue();
+    } catch (e) {}
+  }, 25000);
+
+  // Camera start / switch
+  async function startScanner(facingMode) {
+    try {
+      if (html5QrCode && html5QrCode.isScanning) await html5QrCode.stop();
+    } catch (e) {}
+
+    html5QrCode = new Html5Qrcode("reader");
+    const config = {
+      fps: 18,
+      qrbox: (w, h) => {
+        const edge = Math.floor(Math.min(w, h) * 0.75);
+        return { width: edge, height: edge };
+      },
+      aspectRatio: 1.0,
+      disableFlip: false,
+    };
+
+    html5QrCode.start(
+      { facingMode: facingMode },
+      config,
+      (decodedText) => processRegId(decodedText),
+      () => {}
+    ).then(() => {
+      setStatus('Ready &bull; Connected', 'ready');
+    }).catch(err => {
+      setStatus('Camera error: ' + err, 'error');
+    });
+  }
+
+  document.getElementById('btn-flip').addEventListener('click', () => {
+    currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+    startScanner(currentFacingMode);
+  });
+
+  // Modal Handlers
+  const modalManual = document.getElementById('modal-manual');
+  const manualInput = document.getElementById('manual-id-input');
+
+  document.getElementById('btn-manual').addEventListener('click', () => {
+    modalManual.style.display = 'flex';
+    manualInput.focus();
+  });
+
+  document.getElementById('btn-close-modal').addEventListener('click', () => {
+    modalManual.style.display = 'none';
+  });
+
+  document.getElementById('form-manual').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const id = manualInput.value.trim();
+    if (id) {
+      modalManual.style.display = 'none';
+      manualInput.value = '';
+      processRegId(id);
+    }
+  });
+
+  // Device Setup Form
+  const modalDevice = document.getElementById('modal-device');
+  document.getElementById('btn-device-settings').addEventListener('click', () => {
+    modalDevice.style.display = 'flex';
+  });
+
+  document.getElementById('btn-close-device').addEventListener('click', () => {
+    modalDevice.style.display = 'none';
+  });
+
+  document.getElementById('form-device').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const evCode = document.getElementById('cfg-event-code').value.trim().toUpperCase();
+    const accCode = document.getElementById('cfg-access-code').value.trim();
+    const devName = document.getElementById('cfg-device-name').value.trim();
+
+    try {
+      const res = await fetch('/api/auth/scanner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
+        body: JSON.stringify({
+          event_code: evCode,
+          access_code: accCode,
+          device_id: deviceId,
+          device_name: devName
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        scannerToken = data.token;
+        deviceName = devName;
+        localStorage.setItem(TOKEN_KEY, scannerToken);
+        localStorage.setItem(DEVICE_NAME_KEY, deviceName);
+        document.getElementById('hdr-device-name').textContent = deviceName;
+        modalDevice.style.display = 'none';
+        alert(`Connected as '${deviceName}' for event ${evCode}!`);
+      } else {
+        alert(data.message || 'Authentication failed');
+      }
+    } catch (err) {
+      alert('Connection error: ' + err.message);
+    }
+  });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    updateQueueUI();
+    startScanner(currentFacingMode);
+  });
+</script>
+
+</body>
+</html>

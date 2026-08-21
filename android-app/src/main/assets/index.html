@@ -1,0 +1,1741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>AttendQR — Mobile Scanner</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    :root {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --bg-input: #0d1117;
+      --border: #30363d;
+      --border-focus: #58a6ff;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --text-dim: #6e7681;
+      --accent: #58a6ff;
+      --accent-hover: #79b8ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --radius: 12px;
+      --sat: env(safe-area-inset-top, 0px);
+      --sab: env(safe-area-inset-bottom, 0px);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding-top: var(--sat);
+      padding-bottom: calc(var(--sab) + 65px);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Top App Bar */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.7rem 1rem;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .brand-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .status-badge {
+      font-size: 0.68rem;
+      background: rgba(63, 185, 80, 0.12);
+      color: var(--success);
+      border: 1px solid rgba(63, 185, 80, 0.25);
+      padding: 0.2rem 0.6rem;
+      border-radius: 99px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .status-badge.badge-offline {
+      background: rgba(210, 153, 34, 0.12);
+      color: var(--warning);
+      border-color: rgba(210, 153, 34, 0.35);
+    }
+
+    .btn-clear-top {
+      background: rgba(248,81,73,0.1);
+      border: 1px solid rgba(248,81,73,0.3);
+      color: var(--danger);
+      border-radius: 7px;
+      padding: 0.28rem 0.65rem;
+      font-family: inherit;
+      font-size: 0.7rem;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.03em;
+    }
+
+    /* Main Container */
+    .view-container {
+      flex: 1;
+      max-width: 540px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0.85rem 1rem;
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.18s ease; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.15rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .card-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 0.85rem;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      padding: 0.65rem 1.15rem;
+      border: none;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn:active { transform: scale(0.97); opacity: 0.85; }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-success { background: var(--success); color: #000; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-outline { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+    .btn-ghost   { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid var(--border); }
+    .btn-block   { width: 100%; }
+    .btn-sm      { padding: 0.4rem 0.75rem; font-size: 0.78rem; }
+
+    /* Forms */
+    .form-group { margin-bottom: 0.85rem; }
+    .form-label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+
+    .form-control, .form-select {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.9rem;
+      padding: 0.6rem 0.85rem;
+      outline: none;
+    }
+
+    .form-control:focus, .form-select:focus { border-color: var(--border-focus); }
+
+    /* ===== SCANNER TAB ===== */
+    .stats-pill {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.65rem 0.85rem;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      margin-bottom: 0.85rem;
+    }
+
+    .stat-item { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
+    .stat-num { font-size: 1.35rem; font-weight: 700; line-height: 1; }
+    .stat-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+
+    .viewfinder-wrap {
+      position: relative;
+      width: 100%;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #000;
+      border: 1px solid var(--border);
+      aspect-ratio: 1 / 1;
+      max-height: 380px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 0.75rem;
+    }
+
+    #reader {
+      width: 100% !important;
+      height: 100% !important;
+      border: none !important;
+    }
+
+    #reader video {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+      border-radius: 13px;
+    }
+
+    .scanner-laser {
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      height: 1.5px;
+      background: linear-gradient(90deg, transparent, var(--accent), var(--accent), transparent);
+      box-shadow: 0 0 10px var(--accent);
+      top: 20%;
+      z-index: 10;
+      pointer-events: none;
+      animation: scanLaser 2.4s ease-in-out infinite alternate;
+    }
+
+    @keyframes scanLaser {
+      0%   { top: 12%; opacity: 0.35; }
+      50%  { opacity: 1; }
+      100% { top: 88%; opacity: 0.35; }
+    }
+
+    .viewfinder-corners {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9;
+    }
+
+    .viewfinder-corners::before,
+    .viewfinder-corners::after {
+      content: '';
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border-color: var(--accent);
+      border-style: solid;
+      opacity: 0.7;
+    }
+
+    .viewfinder-corners::before {
+      top: 10%;
+      left: 10%;
+      border-width: 2.5px 0 0 2.5px;
+      border-radius: 3px 0 0 0;
+    }
+
+    .viewfinder-corners::after {
+      bottom: 10%;
+      right: 10%;
+      border-width: 0 2.5px 2.5px 0;
+      border-radius: 0 0 3px 0;
+    }
+
+    .scan-result-card {
+      border-radius: 12px;
+      padding: 1rem 1.15rem;
+      display: none;
+      margin-bottom: 0.75rem;
+      animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes popIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    .scan-result-card.visible { display: block; }
+    .result-ok  { background: rgba(63, 185, 80, 0.12); border: 1.5px solid rgba(63,185,80,0.4); }
+    .result-dup { background: rgba(210, 153, 34, 0.12); border: 1.5px solid rgba(210,153,34,0.4); }
+    .result-err { background: rgba(248, 81, 73, 0.12); border: 1.5px solid rgba(248,81,73,0.4); }
+
+    .result-header { display: flex; align-items: center; gap: 0.65rem; }
+    .result-dot {
+      width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    }
+    .result-ok  .result-dot { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .result-dup .result-dot { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+    .result-err .result-dot { background: var(--danger);  box-shadow: 0 0 8px var(--danger); }
+
+    .result-status { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+    .result-ok  .result-status { color: var(--success); }
+    .result-dup .result-status { color: var(--warning); }
+    .result-err .result-status { color: var(--danger); }
+
+    .result-name { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-top: 0.45rem; }
+    .result-dept { font-size: 0.82rem; color: var(--text-muted); margin-top: 0.1rem; }
+    .result-msg  { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; font-family: monospace; }
+
+    /* Scan history */
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.6rem;
+    }
+
+    .history-title {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+    }
+
+    .history-clear {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-family: inherit;
+      font-size: 0.68rem;
+      cursor: pointer;
+      padding: 0.15rem 0.5rem;
+      border-radius: 5px;
+    }
+
+    .history-list {
+      max-height: 155px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.28rem;
+    }
+
+    .history-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.32rem 0.55rem;
+      border-radius: 7px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid transparent;
+    }
+
+    .history-indicator {
+      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    }
+    .h-ok  { background: var(--success); }
+    .h-dup { background: var(--warning); }
+    .h-err { background: var(--danger); }
+
+    .history-info { flex: 1; min-width: 0; }
+    .history-name { font-size: 0.78rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-sub  { font-size: 0.68rem; color: var(--text-muted); }
+    .history-time { font-size: 0.65rem; color: var(--text-dim); white-space: nowrap; font-family: monospace; }
+
+    /* ===== DASHBOARD TAB ===== */
+    .search-input {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.88rem;
+      padding: 0.6rem 0.85rem;
+      margin-bottom: 0.75rem;
+      outline: none;
+      font-family: inherit;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      max-height: 380px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th {
+      background: rgba(255,255,255,0.04);
+      padding: 0.55rem 0.75rem;
+      text-align: left;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid rgba(48,54,61,0.5);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.12rem 0.5rem;
+      border-radius: 99px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    .badge-present { background: rgba(63,185,80,0.15); color: var(--success); border: 1px solid rgba(63,185,80,0.2); }
+    .badge-absent  { background: rgba(110,118,129,0.12); color: var(--text-muted); border: 1px solid rgba(110,118,129,0.2); }
+
+    /* ===== BOTTOM NAV ===== */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      display: flex;
+      height: 60px;
+      padding-bottom: var(--sab);
+      z-index: 100;
+    }
+
+    .nav-tab {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.2rem;
+      color: var(--text-dim);
+      font-size: 0.68rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.15s;
+      border: none;
+      background: none;
+      font-family: inherit;
+    }
+
+    .nav-tab svg { opacity: 0.5; transition: opacity 0.15s; }
+    .nav-tab.active { color: var(--accent); font-weight: 700; }
+    .nav-tab.active svg { opacity: 1; }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      z-index: 999;
+    }
+
+    .modal-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 360px;
+      padding: 1.35rem;
+    }
+
+    .modal-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.3rem;
+    }
+
+    .modal-sub {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 0.9rem;
+    }
+
+    .section-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-dim);
+      margin-bottom: 0.6rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .danger-card {
+      background: rgba(248,81,73,0.05);
+      border: 1px solid rgba(248,81,73,0.2);
+      border-radius: var(--radius);
+      padding: 1rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .danger-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--danger);
+      margin-bottom: 0.4rem;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 1.5rem 1rem;
+    }
+
+    .empty-state p {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+      line-height: 1.5;
+    }
+
+    .queue-banner {
+      background: rgba(210,153,34,0.15);
+      border: 1px solid rgba(210,153,34,0.4);
+      color: var(--warning);
+      border-radius: 8px;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.75rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top App Bar -->
+  <header class="top-bar">
+    <div style="display:flex;flex-direction:column;gap:0.05rem;">
+      <div class="brand">
+        <div class="brand-dot"></div>
+        AttendQR
+      </div>
+      <span id="event-name-display" onclick="switchTab('cloud')" style="font-size:0.7rem;color:var(--text-muted);cursor:pointer;letter-spacing:0.02em;padding-left:1.1rem;" title="Tap to view server & event setup">Local Standalone</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;">
+      <span class="status-badge" id="top-status-badge">Local Mode</span>
+      <button type="button" class="btn-clear-top" onclick="clearAllData()">Reset</button>
+    </div>
+  </header>
+
+  <main class="view-container">
+
+    <!-- ========================================================
+         SCANNER TAB
+         ======================================================== -->
+    <div id="tab-scan" class="tab-content active">
+
+      <!-- Pending Sync Queue Banner -->
+      <div id="pending-queue-banner" class="queue-banner" style="display:none;">
+        <span id="queue-banner-text">🟠 0 scans pending sync</span>
+        <button type="button" class="btn btn-outline btn-sm" style="padding:0.15rem 0.45rem;font-size:0.68rem;" onclick="flushOfflineQueue()">Sync Now</button>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-pill">
+        <div class="stat-item">
+          <span class="stat-num" style="color:var(--success)" id="scan-cnt-ok">0</span>
+          <span class="stat-label">Checked In</span>
+        </div>
+        <div class="stat-item" style="width:1px;height:32px;background:var(--border);"></div>
+        <div class="stat-item">
+          <span class="stat-num" style="color:var(--warning)" id="scan-cnt-dup">0</span>
+          <span class="stat-label">Duplicates</span>
+        </div>
+        <div class="stat-item" style="width:1px;height:32px;background:var(--border);"></div>
+        <div class="stat-item">
+          <span class="stat-num" style="color:var(--text-muted)" id="scan-cnt-total">0</span>
+          <span class="stat-label">Total</span>
+        </div>
+      </div>
+
+      <!-- Viewfinder -->
+      <div class="viewfinder-wrap" id="viewfinder">
+        <div id="reader"></div>
+        <div class="scanner-laser" id="laser"></div>
+        <div class="viewfinder-corners"></div>
+      </div>
+
+      <!-- Action buttons -->
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+        <button type="button" class="btn btn-ghost btn-block btn-sm" id="btn-flip">Flip Camera</button>
+        <button type="button" class="btn btn-ghost btn-block btn-sm" id="btn-manual-open">Enter ID</button>
+        <button type="button" class="btn btn-ghost btn-block btn-sm" id="btn-undo" onclick="undoLastScan()" style="color:var(--warning);border-color:rgba(210,153,34,0.35);background:rgba(210,153,34,0.07);" disabled>Undo</button>
+      </div>
+
+      <!-- Scan result card -->
+      <div class="scan-result-card" id="result-card">
+        <div class="result-header">
+          <div class="result-dot"></div>
+          <span class="result-status" id="res-status">Checked In</span>
+        </div>
+        <div class="result-name" id="res-name">Participant Name</div>
+        <div class="result-dept" id="res-dept">Department</div>
+        <div class="result-msg" id="res-msg"></div>
+      </div>
+
+      <!-- Scan History -->
+      <div class="card" style="padding:0.85rem;">
+        <div class="history-header">
+          <span class="history-title">Recent Scans</span>
+          <button type="button" class="history-clear" onclick="clearHistory()">Clear</button>
+        </div>
+        <div class="history-list" id="scan-history-list">
+          <div style="text-align:center;color:var(--text-dim);font-size:0.78rem;padding:0.75rem 0;">No scans yet</div>
+        </div>
+      </div>
+
+      <!-- Empty roster alert -->
+      <div id="empty-roster-alert" class="card" style="display:none;">
+        <div class="empty-state">
+          <p>No roster loaded. Connect to Cloud Server or import a local registration sheet.</p>
+          <button type="button" class="btn btn-primary" onclick="switchTab('cloud')">
+            Setup Cloud Sync
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================================
+         DASHBOARD TAB
+         ======================================================== -->
+    <div id="tab-dashboard" class="tab-content">
+      <div class="card" style="padding:1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem;">
+          <span style="font-size:0.82rem;font-weight:600;color:var(--text-muted);">Attendance</span>
+          <span id="dash-pct-badge" style="font-size:0.9rem;font-weight:700;color:var(--accent);font-family:monospace;">0%</span>
+        </div>
+        <div style="background:rgba(255,255,255,0.07);height:6px;border-radius:99px;overflow:hidden;">
+          <div id="dash-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--success));transition:width 0.4s ease;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-muted);margin-top:0.45rem;">
+          <span>Present: <strong style="color:var(--success)" id="dash-attended-num">0</strong></span>
+          <span>Total: <strong style="color:var(--text)" id="dash-total-num">0</strong></span>
+        </div>
+      </div>
+
+      <div class="card" style="padding:1rem;">
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+          <input type="text" id="dash-search" class="search-input" style="margin-bottom:0;flex:1;" placeholder="Search name, ID, department..." />
+          <button type="button" id="btn-absent-filter" onclick="toggleAbsentFilter()" class="btn btn-ghost btn-sm" style="white-space:nowrap;font-size:0.72rem;">Absent Only</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:75px;">ID</th>
+                <th id="th-col-name">Name</th>
+                <th id="th-col-dept">Department</th>
+                <th style="width:70px;">Status</th>
+                <th style="width:90px;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="dash-table-body">
+              <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1.5rem;">No participants</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-outline btn-block" onclick="exportAttendanceCSV()">
+        Export Attendance CSV
+      </button>
+    </div>
+
+    <!-- ========================================================
+         CLOUD SYNC / SETTINGS TAB
+         ======================================================== -->
+    <div id="tab-cloud" class="tab-content">
+      <div class="section-label">Central Cloud Sync</div>
+
+      <div class="card">
+        <div class="card-title">🌐 Central Server Connection</div>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.85rem;line-height:1.4;">
+          Connect multiple mobile scanner APKs to one centralized backend.
+        </p>
+
+        <div class="form-group">
+          <label class="form-label" for="cfg-server-url">Server Base URL</label>
+          <input type="url" id="cfg-server-url" class="form-control" placeholder="e.g. https://api.yourdomain.com or http://192.168.1.50:5001" style="font-size:0.82rem;" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="cfg-apk-event-code">Event Code</label>
+          <input type="text" id="cfg-apk-event-code" class="form-control" placeholder="e.g. AAZHI26" style="font-family:monospace;text-transform:uppercase;" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="cfg-apk-access-code">Scanner Access Code</label>
+          <input type="text" id="cfg-apk-access-code" class="form-control" placeholder="e.g. SCAN123" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="cfg-apk-device-name">Device Name</label>
+          <input type="text" id="cfg-apk-device-name" class="form-control" placeholder="e.g. Scanner-01, Gate-A" />
+        </div>
+
+        <button type="button" class="btn btn-primary btn-block" onclick="connectToCloudServer()">
+          Connect to Server
+        </button>
+        <button type="button" class="btn btn-ghost btn-block btn-sm" style="margin-top:0.45rem;" onclick="disconnectCloudServer()">
+          Switch to Local Standalone Mode
+        </button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🔄 Sync Status &amp; Roster Cache</div>
+        <div style="font-size:0.82rem;margin-bottom:0.75rem;">
+          <div>Mode: <strong id="lbl-current-mode" style="color:var(--accent);">Local Standalone</strong></div>
+          <div style="margin-top:0.2rem;">Pending Scans: <strong id="lbl-pending-count" style="color:var(--warning);">0</strong></div>
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <button type="button" class="btn btn-outline btn-block btn-sm" onclick="flushOfflineQueue()">
+            Sync Pending Scans
+          </button>
+          <button type="button" class="btn btn-ghost btn-block btn-sm" onclick="downloadServerRoster()">
+            Refresh Roster
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================
+         ROSTER & QR TAB (Local Standalone Mode)
+         ======================================================== -->
+    <div id="tab-import" class="tab-content">
+
+      <div class="section-label">Local Import</div>
+
+      <div class="card">
+        <div class="card-title">Registration Sheet</div>
+        <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.85rem;line-height:1.5;">
+          Upload a Google Form response sheet (.csv or .xlsx) directly into the phone's local storage.
+        </p>
+        <input type="file" id="sheet-file-input" accept=".csv,.xlsx" style="display:none;" />
+        <button type="button" class="btn btn-primary btn-block" onclick="document.getElementById('sheet-file-input').click()">
+          Choose Sheet File
+        </button>
+        <div id="selected-file-label" style="font-size:0.78rem;color:var(--text-muted);margin-top:0.55rem;display:none;font-family:monospace;"></div>
+      </div>
+
+      <!-- Column mapping -->
+      <div class="card" id="mapping-card" style="display:none;">
+        <div class="card-title">Column Mapping &amp; ID Format</div>
+
+        <div class="form-group">
+          <label class="form-label" for="map-prefix">ID Prefix</label>
+          <input type="text" id="map-prefix" class="form-control" value="AAZHI-" placeholder="e.g. AAZHI-, RP0 (or leave empty)" oninput="updateCustomIdPreview()" style="font-family:monospace;font-weight:700;letter-spacing:1px;" />
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.4rem;">
+            Preview: <span id="live-id-preview" style="color:var(--accent);font-family:monospace;">AAZHI-001, AAZHI-002</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="map-name">Primary Name Column</label>
+          <select id="map-name" class="form-select"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="map-dept">Secondary Column (Dept, Branch, Role, etc.)</label>
+          <select id="map-dept" class="form-select"></select>
+        </div>
+        <button type="button" class="btn btn-success btn-block" id="btn-save-roster" onclick="confirmMappingAndBuildRoster()">
+          Save Local Roster
+        </button>
+      </div>
+
+      <div class="section-label">Generate</div>
+
+      <div class="card">
+        <div class="card-title">QR Codes ZIP</div>
+        <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.85rem;line-height:1.5;">
+          Generates high-res QR passes directly on device and saves to Downloads.
+        </p>
+        <button type="button" class="btn btn-outline btn-block" id="btn-generate-zip" onclick="generateQRCodesZip()">
+          Generate &amp; Download ZIP
+        </button>
+        <div id="zip-progress" style="display:none;font-size:0.78rem;color:var(--text-muted);margin-top:0.6rem;text-align:center;font-family:monospace;"></div>
+      </div>
+
+      <div class="section-label">Danger Zone</div>
+
+      <div class="danger-card">
+        <div class="danger-title">Reset All Data</div>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.75rem;line-height:1.5;">
+          Permanently clears local participants, attendance records and offline queue.
+        </p>
+        <button type="button" class="btn btn-danger btn-block btn-sm" onclick="clearAllData()">
+          Clear All Local Data
+        </button>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Manual ID Entry Modal -->
+  <div class="modal-overlay" id="modal-manual" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-title">Manual Check-In</div>
+      <div class="modal-sub">Enter the participant registration ID</div>
+      <input type="text" id="manual-input-val" class="form-control" placeholder="e.g. AAZHI-001" style="text-align:center;font-family:monospace;font-size:1.2rem;letter-spacing:1.5px;padding:0.65rem;" />
+      <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+        <button type="button" class="btn btn-ghost" style="flex:1" onclick="closeManualModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" style="flex:1" onclick="submitManualId()">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-tab active" onclick="switchTab('scan')" id="tabbtn-scan">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+        <rect x="7" y="7" width="10" height="10" rx="1"/>
+      </svg>
+      <span>Scanner</span>
+    </button>
+    <button class="nav-tab" onclick="switchTab('dashboard')" id="tabbtn-dashboard">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-tab" onclick="switchTab('cloud')" id="tabbtn-cloud">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+      </svg>
+      <span>Cloud Sync</span>
+    </button>
+    <button class="nav-tab" onclick="switchTab('import')" id="tabbtn-import">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14,2 14,8 20,8"/><line x1="12" y1="18" x2="12" y2="12"/>
+        <line x1="9" y1="15" x2="12" y2="12"/><line x1="15" y1="15" x2="12" y2="12"/>
+      </svg>
+      <span>Local Sheet</span>
+    </button>
+  </nav>
+
+  <!-- Offline JS Libraries -->
+  <script src="html5-qrcode.min.js"></script>
+  <script src="xlsx.full.min.js"></script>
+  <script src="qrcode.min.js"></script>
+  <script src="jszip.min.js"></script>
+  <script>
+    // ------------------------------------------------------------
+    // State & Storage Keys
+    // ------------------------------------------------------------
+    const STORAGE_KEY = 'attendqr_roster_v1';
+    const META_KEY = 'attendqr_meta_v1';
+    const QUEUE_KEY = 'attendqr_offline_sync_queue';
+    const CLOUD_CFG_KEY = 'attendqr_cloud_config';
+
+    let roster = [];
+    let metaColumns = { name_col: 'Name', dept_col: 'Department' };
+    let parsedRawHeaders = [];
+    let parsedRawRows = [];
+    let processingLock = false;
+    let counts = { ok: 0, dup: 0 };
+    let html5QrCode = null;
+    let currentFacingMode = "environment";
+    let lastCheckedIn = null;
+    let showAbsentOnly = false;
+
+    // Cloud Config State
+    let cloudConfig = {
+      enabled: false,
+      serverUrl: '',
+      eventCode: '',
+      eventId: '',
+      eventName: '',
+      accessCode: '',
+      deviceName: 'Scanner-01',
+      deviceId: 'dev_' + Math.random().toString(36).substr(2, 9),
+      token: ''
+    };
+
+    function loadCloudConfig() {
+      try {
+        const raw = localStorage.getItem(CLOUD_CFG_KEY);
+        if (raw) Object.assign(cloudConfig, JSON.parse(raw));
+      } catch (e) {}
+
+      document.getElementById('cfg-server-url').value = cloudConfig.serverUrl || '';
+      document.getElementById('cfg-apk-event-code').value = cloudConfig.eventCode || '';
+      document.getElementById('cfg-apk-access-code').value = cloudConfig.accessCode || '';
+      document.getElementById('cfg-apk-device-name').value = cloudConfig.deviceName || 'Scanner-01';
+      updateCloudStatusUI();
+    }
+
+    function saveCloudConfig() {
+      try {
+        localStorage.setItem(CLOUD_CFG_KEY, JSON.stringify(cloudConfig));
+      } catch (e) {}
+      updateCloudStatusUI();
+    }
+
+    function updateCloudStatusUI() {
+      const topBadge = document.getElementById('top-status-badge');
+      const eventDisplay = document.getElementById('event-name-display');
+      const modeLabel = document.getElementById('lbl-current-mode');
+
+      if (cloudConfig.enabled && cloudConfig.token) {
+        topBadge.className = 'status-badge';
+        topBadge.textContent = '🟢 Online (' + cloudConfig.deviceName + ')';
+        eventDisplay.textContent = cloudConfig.eventName || cloudConfig.eventCode;
+        modeLabel.textContent = 'Cloud Mode (' + cloudConfig.eventCode + ')';
+      } else {
+        topBadge.className = 'status-badge badge-offline';
+        topBadge.textContent = '⚡ Local Mode';
+        eventDisplay.textContent = 'Local Standalone';
+        modeLabel.textContent = 'Local Standalone Mode';
+      }
+      updateQueueUI();
+    }
+
+    function getOfflineQueue() {
+      try {
+        return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveOfflineQueue(q) {
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+      updateQueueUI();
+    }
+
+    function updateQueueUI() {
+      const q = getOfflineQueue();
+      document.getElementById('lbl-pending-count').textContent = q.length;
+      const banner = document.getElementById('pending-queue-banner');
+      const bannerText = document.getElementById('queue-banner-text');
+
+      if (q.length > 0) {
+        banner.style.display = 'flex';
+        bannerText.textContent = `🟠 Offline — ${q.length} scan${q.length === 1 ? '' : 's'} pending sync`;
+        if (cloudConfig.enabled) {
+          document.getElementById('top-status-badge').className = 'status-badge badge-offline';
+          document.getElementById('top-status-badge').textContent = `🟠 ${q.length} Pending`;
+        }
+      } else {
+        banner.style.display = 'none';
+        if (cloudConfig.enabled && cloudConfig.token) {
+          document.getElementById('top-status-badge').className = 'status-badge';
+          document.getElementById('top-status-badge').textContent = '🟢 Online (' + cloudConfig.deviceName + ')';
+        }
+      }
+    }
+
+    // Audio chimes
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playBeep(type) {
+      try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        if (type === 'ok') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+          osc.frequency.setValueAtTime(1320, audioCtx.currentTime + 0.1);
+          gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+          osc.start(); osc.stop(audioCtx.currentTime + 0.35);
+        } else if (type === 'duplicate') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+          osc.frequency.setValueAtTime(370, audioCtx.currentTime + 0.12);
+          gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+          osc.start(); osc.stop(audioCtx.currentTime + 0.35);
+        } else {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+          osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+        }
+      } catch (e) {}
+    }
+
+    // ------------------------------------------------------------
+    // Cloud Connection & Sync
+    // ------------------------------------------------------------
+    async function connectToCloudServer() {
+      let url = document.getElementById('cfg-server-url').value.trim();
+      const eventCode = document.getElementById('cfg-apk-event-code').value.trim().toUpperCase();
+      const accessCode = document.getElementById('cfg-apk-access-code').value.trim();
+      const deviceName = document.getElementById('cfg-apk-device-name').value.trim() || 'Scanner-01';
+
+      if (!url || !eventCode || !accessCode) {
+        alert('Server URL, Event Code, and Access Code are required.');
+        return;
+      }
+
+      if (url.endsWith('/')) url = url.slice(0, -1);
+
+      try {
+        const res = await fetch(`${url}/api/auth/scanner`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
+          body: JSON.stringify({
+            event_code: eventCode,
+            access_code: accessCode,
+            device_id: cloudConfig.deviceId,
+            device_name: deviceName
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.token) {
+          alert('Auth failed: ' + (data.message || 'Check event code & access code.'));
+          return;
+        }
+
+        cloudConfig.enabled = true;
+        cloudConfig.serverUrl = url;
+        cloudConfig.eventCode = eventCode;
+        cloudConfig.eventId = data.event.id;
+        cloudConfig.eventName = data.event.name;
+        cloudConfig.accessCode = accessCode;
+        cloudConfig.deviceName = deviceName;
+        cloudConfig.token = data.token;
+        saveCloudConfig();
+
+        alert(`Connected to '${data.event.name}' as '${deviceName}'! Downloading roster cache...`);
+        await downloadServerRoster();
+        switchTab('scan');
+
+      } catch (err) {
+        alert('Connection error: ' + err.message);
+      }
+    }
+
+    function disconnectCloudServer() {
+      cloudConfig.enabled = false;
+      cloudConfig.token = '';
+      saveCloudConfig();
+      alert('Switched to Local Standalone Mode.');
+    }
+
+    async function downloadServerRoster() {
+      if (!cloudConfig.enabled || !cloudConfig.serverUrl || !cloudConfig.eventId) return;
+      try {
+        const res = await fetch(`${cloudConfig.serverUrl}/api/events/${cloudConfig.eventId}/roster`, {
+          headers: {
+            'Authorization': 'Bearer ' + cloudConfig.token,
+            'Bypass-Tunnel-Reminder': 'true'
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.roster) {
+            roster = data.roster;
+            saveRosterToStorage();
+          }
+        }
+      } catch (e) {
+        console.log('Failed to fetch server roster cache:', e);
+      }
+    }
+
+    async function flushOfflineQueue() {
+      const q = getOfflineQueue();
+      if (!q.length || !cloudConfig.enabled || !cloudConfig.serverUrl || !cloudConfig.eventId) return;
+
+      try {
+        const res = await fetch(`${cloudConfig.serverUrl}/api/events/${cloudConfig.eventId}/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + cloudConfig.token,
+            'Bypass-Tunnel-Reminder': 'true'
+          },
+          body: JSON.stringify({
+            device_id: cloudConfig.deviceId,
+            device_name: cloudConfig.deviceName,
+            scans: q
+          })
+        });
+
+        if (res.ok) {
+          saveOfflineQueue([]);
+          updateCloudStatusUI();
+        }
+      } catch (e) {
+        console.log('Sync retry delayed, offline');
+      }
+    }
+
+    // Periodic Heartbeat
+    setInterval(async () => {
+      if (!cloudConfig.enabled || !cloudConfig.serverUrl || !cloudConfig.eventId || !cloudConfig.token) return;
+      const q = getOfflineQueue();
+      try {
+        await fetch(`${cloudConfig.serverUrl}/api/events/${cloudConfig.eventId}/heartbeat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + cloudConfig.token,
+            'Bypass-Tunnel-Reminder': 'true'
+          },
+          body: JSON.stringify({ pending_count: q.length, status: 'online' })
+        });
+        if (q.length > 0) flushOfflineQueue();
+      } catch (e) {}
+    }, 25000);
+
+    // ------------------------------------------------------------
+    // Local Storage
+    // ------------------------------------------------------------
+    function loadRosterFromStorage() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) roster = JSON.parse(raw);
+      } catch (e) { roster = []; }
+
+      try {
+        const rawMeta = localStorage.getItem(META_KEY);
+        if (rawMeta) metaColumns = JSON.parse(rawMeta);
+      } catch (e) {
+        metaColumns = { name_col: 'Name', dept_col: 'Department' };
+      }
+
+      updateStatsAndUI();
+    }
+
+    function saveRosterToStorage() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(roster)); } catch (e) {}
+      try { localStorage.setItem(META_KEY, JSON.stringify(metaColumns)); } catch (e) {}
+      updateStatsAndUI();
+    }
+
+    function updateStatsAndUI() {
+      const total = roster.length;
+      const attended = roster.filter(r => r.attended).length;
+      const pct = total > 0 ? Math.round((attended / total) * 100) : 0;
+
+      document.getElementById('scan-cnt-ok').textContent = attended;
+      document.getElementById('scan-cnt-dup').textContent = counts.dup;
+      document.getElementById('scan-cnt-total').textContent = total;
+      document.getElementById('dash-attended-num').textContent = attended;
+      document.getElementById('dash-total-num').textContent = total;
+      document.getElementById('dash-pct-badge').textContent = pct + '%';
+      document.getElementById('dash-progress-bar').style.width = pct + '%';
+      document.getElementById('empty-roster-alert').style.display = (total === 0) ? 'block' : 'none';
+      renderDashboardTable();
+    }
+
+    // ------------------------------------------------------------
+    // Tab Navigation
+    // ------------------------------------------------------------
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + tabId).classList.add('active');
+      const navBtn = document.getElementById('tabbtn-' + tabId);
+      if (navBtn) navBtn.classList.add('active');
+
+      if (tabId === 'scan') startScanner(currentFacingMode);
+      else stopScanner();
+      if (tabId === 'dashboard') renderDashboardTable();
+    }
+
+    // ------------------------------------------------------------
+    // Scan History
+    // ------------------------------------------------------------
+    const scanHistory = [];
+
+    function addToHistory(type, id, name, label) {
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      scanHistory.unshift({ type, id, name, label, time: now });
+      if (scanHistory.length > 50) scanHistory.pop();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const list = document.getElementById('scan-history-list');
+      if (!scanHistory.length) {
+        list.innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:0.78rem;padding:0.75rem 0;">No scans yet</div>';
+        return;
+      }
+      list.innerHTML = scanHistory.map(h => `
+        <div class="history-row">
+          <div class="history-indicator h-${h.type}"></div>
+          <div class="history-info">
+            <div class="history-name">${esc(h.name || h.id)}</div>
+            <div class="history-sub">${esc(h.id)} &middot; ${esc(h.label)}</div>
+          </div>
+          <span class="history-time">${h.time}</span>
+        </div>
+      `).join('');
+    }
+
+    function clearHistory() {
+      scanHistory.length = 0;
+      renderHistory();
+    }
+
+    // ------------------------------------------------------------
+    // Scanner Engine
+    // ------------------------------------------------------------
+    async function processScannedId(rawId) {
+      if (processingLock) return;
+      processingLock = true;
+
+      const regId = String(rawId).trim();
+      const scanId = 'apk_scan_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      const nowIso = new Date().toISOString();
+
+      const resCard   = document.getElementById('result-card');
+      const resStatus = document.getElementById('res-status');
+      const resName   = document.getElementById('res-name');
+      const resDept   = document.getElementById('res-dept');
+      const resMsg    = document.getElementById('res-msg');
+
+      // 1. If Cloud Mode is active, send to server
+      if (cloudConfig.enabled && cloudConfig.serverUrl && cloudConfig.eventId) {
+        try {
+          const res = await fetch(`${cloudConfig.serverUrl}/api/events/${cloudConfig.eventId}/scan`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + cloudConfig.token,
+              'Bypass-Tunnel-Reminder': 'true'
+            },
+            body: JSON.stringify({
+              reg_id: regId,
+              scan_id: scanId,
+              scanned_at: nowIso,
+              device_id: cloudConfig.deviceId,
+              device_name: cloudConfig.deviceName
+            })
+          });
+
+          const data = await res.json();
+          if (data.status === 'ok') {
+            resCard.className = 'scan-result-card visible result-ok';
+            resStatus.textContent = 'Checked In';
+            resName.textContent = data.name || regId;
+            resDept.textContent = data.department || '';
+            resMsg.textContent = regId;
+            if (navigator.vibrate) navigator.vibrate(100);
+            playBeep('ok');
+            addToHistory('ok', regId, data.name, 'Checked In (Cloud)');
+            // Update local memory cache
+            const p = roster.find(r => r.reg_id.toLowerCase() === regId.toLowerCase());
+            if (p) { p.attended = 1; p.scanned_at = nowIso; saveRosterToStorage(); }
+          } else if (data.status === 'duplicate') {
+            counts.dup++;
+            resCard.className = 'scan-result-card visible result-dup';
+            resStatus.textContent = 'Duplicate';
+            resName.textContent = data.name || regId;
+            resDept.textContent = data.department || '';
+            resMsg.textContent = 'Scanned by ' + (data.scanner || 'scanner');
+            if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
+            playBeep('duplicate');
+            addToHistory('dup', regId, data.name, 'Duplicate');
+          } else {
+            resCard.className = 'scan-result-card visible result-err';
+            resStatus.textContent = 'Not Found';
+            resName.textContent = regId;
+            resDept.textContent = '';
+            resMsg.textContent = 'ID not in event roster';
+            if (navigator.vibrate) navigator.vibrate(250);
+            playBeep('err');
+            addToHistory('err', regId, regId, 'Not in roster');
+          }
+
+          flushOfflineQueue();
+          unlockAfterDelay(resCard);
+          return;
+
+        } catch (err) {
+          // Offline failover: queue scan locally
+          const q = getOfflineQueue();
+          q.push({ scan_id: scanId, reg_id: regId, scanned_at: nowIso });
+          saveOfflineQueue(q);
+        }
+      }
+
+      // 2. Local Fallback / Standalone Mode
+      const person = roster.find(r => r.reg_id.toLowerCase() === regId.toLowerCase());
+
+      if (!person) {
+        resCard.className = 'scan-result-card visible result-err';
+        resStatus.textContent = 'Not Found';
+        resName.textContent = regId;
+        resDept.textContent = '';
+        resMsg.textContent = cloudConfig.enabled ? 'Saved offline (Unknown locally)' : 'ID not in roster';
+        if (navigator.vibrate) navigator.vibrate(250);
+        playBeep('err');
+        addToHistory('err', regId, regId, 'Not in roster');
+      } else if (!person.attended) {
+        person.attended = 1;
+        person.scanned_at = nowIso;
+        saveRosterToStorage();
+        lastCheckedIn = { reg_id: person.reg_id };
+        document.getElementById('btn-undo').disabled = false;
+        resCard.className = 'scan-result-card visible result-ok';
+        resStatus.textContent = cloudConfig.enabled ? 'Checked In (Offline Queue)' : 'Checked In';
+        resName.textContent = person.name;
+        resDept.textContent = person.department || '';
+        resMsg.textContent = person.reg_id;
+        if (navigator.vibrate) navigator.vibrate(100);
+        playBeep('ok');
+        addToHistory('ok', person.reg_id, person.name, cloudConfig.enabled ? 'Queued Offline' : 'Checked In');
+      } else {
+        counts.dup++;
+        resCard.className = 'scan-result-card visible result-dup';
+        resStatus.textContent = 'Duplicate';
+        resName.textContent = person.name;
+        resDept.textContent = person.department || '';
+        resMsg.textContent = 'Scanned at ' + new Date(person.scanned_at).toLocaleTimeString();
+        if (navigator.vibrate) navigator.vibrate([80, 50, 80]);
+        playBeep('duplicate');
+        addToHistory('dup', person.reg_id, person.name, 'Duplicate');
+      }
+
+      unlockAfterDelay(resCard);
+    }
+
+    function unlockAfterDelay(resCard) {
+      setTimeout(() => {
+        resCard.className = 'scan-result-card';
+        processingLock = false;
+      }, 1800);
+    }
+
+    function undoLastScan() {
+      if (!lastCheckedIn) return;
+      const person = roster.find(r => r.reg_id === lastCheckedIn.reg_id);
+      if (!person || !person.attended) {
+        lastCheckedIn = null;
+        document.getElementById('btn-undo').disabled = true;
+        return;
+      }
+      if (!confirm(`Undo check-in for ${person.name} (${person.reg_id})?`)) return;
+      person.attended = 0;
+      person.scanned_at = null;
+      lastCheckedIn = null;
+      document.getElementById('btn-undo').disabled = true;
+      saveRosterToStorage();
+      addToHistory('dup', person.reg_id, person.name, 'Undone');
+    }
+
+    async function startScanner(facingMode) {
+      try {
+        if (html5QrCode && html5QrCode.isScanning) await html5QrCode.stop();
+      } catch (e) {}
+
+      html5QrCode = new Html5Qrcode("reader");
+      html5QrCode.start(
+        { facingMode },
+        {
+          fps: 20,
+          qrbox: (w, h) => {
+            const edge = Math.floor(Math.min(w, h) * 0.85);
+            return { width: edge, height: edge };
+          },
+          aspectRatio: 1.0,
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+        },
+        (decodedText) => processScannedId(decodedText),
+        () => {}
+      ).catch(err => console.log('Camera error:', err));
+    }
+
+    async function stopScanner() {
+      try {
+        if (html5QrCode && html5QrCode.isScanning) await html5QrCode.stop();
+      } catch (e) {}
+    }
+
+    document.getElementById('btn-flip').addEventListener('click', () => {
+      currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
+      startScanner(currentFacingMode);
+    });
+
+    document.getElementById('btn-manual-open').addEventListener('click', () => {
+      document.getElementById('modal-manual').style.display = 'flex';
+      document.getElementById('manual-input-val').focus();
+    });
+
+    function closeManualModal() {
+      document.getElementById('modal-manual').style.display = 'none';
+    }
+
+    function submitManualId() {
+      const val = document.getElementById('manual-input-val').value.trim();
+      if (val) {
+        closeManualModal();
+        document.getElementById('manual-input-val').value = '';
+        processScannedId(val);
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Dashboard Table
+    // ------------------------------------------------------------
+    document.getElementById('dash-search').addEventListener('input', renderDashboardTable);
+
+    function toggleAbsentFilter() {
+      showAbsentOnly = !showAbsentOnly;
+      const btn = document.getElementById('btn-absent-filter');
+      btn.style.color = showAbsentOnly ? 'var(--warning)' : '';
+      btn.style.borderColor = showAbsentOnly ? 'rgba(210,153,34,0.4)' : '';
+      btn.style.background = showAbsentOnly ? 'rgba(210,153,34,0.08)' : '';
+      renderDashboardTable();
+    }
+
+    function renderDashboardTable() {
+      const q = (document.getElementById('dash-search').value || '').toLowerCase();
+      const tbody = document.getElementById('dash-table-body');
+
+      const nameHeader = metaColumns.name_col || 'Name';
+      const deptHeader = metaColumns.dept_col || '';
+
+      document.getElementById('th-col-name').textContent = nameHeader;
+      const thDept = document.getElementById('th-col-dept');
+      if (deptHeader) {
+        thDept.textContent = deptHeader;
+        thDept.style.display = '';
+      } else {
+        thDept.style.display = 'none';
+      }
+
+      let filtered = roster;
+      if (showAbsentOnly) {
+        filtered = filtered.filter(r => !r.attended);
+      }
+      if (q) {
+        filtered = filtered.filter(r =>
+          r.reg_id.toLowerCase().includes(q) ||
+          (r.name && r.name.toLowerCase().includes(q)) ||
+          (r.department && r.department.toLowerCase().includes(q))
+        );
+      }
+
+      const colSpan = deptHeader ? 5 : 4;
+      if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align:center;color:var(--text-muted);padding:1.5rem;">${showAbsentOnly ? 'Everyone is checked in!' : 'No matching participants'}</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(r => `
+        <tr>
+          <td><code style="color:var(--accent);font-weight:700;font-size:0.78rem;">${esc(r.reg_id)}</code></td>
+          <td><strong>${esc(r.name)}</strong></td>
+          ${deptHeader ? `<td style="color:var(--text-muted);">${esc(r.department)}</td>` : ''}
+          <td>
+            ${r.attended
+              ? `<span class="badge badge-present">Present</span>`
+              : `<span class="badge badge-absent">Absent</span>`}
+          </td>
+          <td>
+            <button onclick="toggleAttendance('${esc(r.reg_id)}')" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:5px;padding:0.15rem 0.45rem;font-size:0.65rem;cursor:pointer;font-family:inherit;white-space:nowrap;">
+              ${r.attended ? 'Mark Absent' : 'Mark Present'}
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function toggleAttendance(reg_id) {
+      const person = roster.find(r => r.reg_id === reg_id);
+      if (!person) return;
+      const action = person.attended ? 'mark absent' : 'mark present';
+      if (!confirm(`Are you sure you want to ${action} for ${person.name} (${reg_id})?`)) return;
+      if (person.attended) {
+        person.attended = 0;
+        person.scanned_at = null;
+        addToHistory('dup', person.reg_id, person.name, 'Manually Marked Absent');
+      } else {
+        person.attended = 1;
+        person.scanned_at = new Date().toISOString();
+        addToHistory('ok', person.reg_id, person.name, 'Manually Marked Present');
+      }
+      saveRosterToStorage();
+    }
+
+    function esc(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ------------------------------------------------------------
+    // Sheet Parsing & Mapping (Local Standalone Mode)
+    // ------------------------------------------------------------
+    document.getElementById('sheet-file-input').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const label = document.getElementById('selected-file-label');
+      label.textContent = file.name;
+      label.style.display = 'block';
+
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+          if (!rows || rows.length < 2) {
+            alert('File appears to be empty or has no data rows.');
+            return;
+          }
+
+          parsedRawHeaders = rows[0].map(h => String(h || '').trim()).filter(h => h.length > 0);
+          parsedRawRows = rows.slice(1).filter(r => r.some(c => String(c || '').trim().length > 0));
+
+          populateMappingDropdowns(parsedRawHeaders);
+          document.getElementById('mapping-card').style.display = 'block';
+        } catch (err) {
+          alert('Failed to parse file: ' + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    function populateMappingDropdowns(headers) {
+      const nameSel = document.getElementById('map-name');
+      nameSel.innerHTML = headers.map(h => `<option value="${esc(h)}">${esc(h)}</option>`).join('');
+
+      const deptSel = document.getElementById('map-dept');
+      deptSel.innerHTML = `<option value="">(None / Skip)</option>` + headers.map(h => `<option value="${esc(h)}">${esc(h)}</option>`).join('');
+
+      const lower = headers.map(h => h.toLowerCase());
+      autoPick('map-name', lower, headers, ['name', 'full name', 'student', 'participant', 'candidate']);
+      autoPick('map-dept', lower, headers, ['department', 'dept', 'college', 'branch', 'school', 'faculty', 'class', 'role', 'organization', 'section']);
+      updateCustomIdPreview();
+    }
+
+    function autoPick(selectId, lowerHeaders, headers, keywords) {
+      const sel = document.getElementById(selectId);
+      for (const kw of keywords) {
+        const idx = lowerHeaders.findIndex(h => h.includes(kw));
+        if (idx !== -1) { sel.value = headers[idx]; break; }
+      }
+    }
+
+    function updateCustomIdPreview() {
+      const prefix = (document.getElementById('map-prefix').value || '').trim();
+      const total = parsedRawRows.length || 10;
+      const digits = Math.max(3, String(total).length);
+      const s1 = prefix + String(1).padStart(digits, '0');
+      const s2 = prefix + String(2).padStart(digits, '0');
+      document.getElementById('live-id-preview').textContent = `${s1}, ${s2}...`;
+    }
+
+    function confirmMappingAndBuildRoster() {
+      const colName = document.getElementById('map-name').value;
+      const colDept = document.getElementById('map-dept').value;
+      const prefix = (document.getElementById('map-prefix').value || '').trim();
+
+      const idxName = parsedRawHeaders.indexOf(colName);
+      const idxDept = colDept ? parsedRawHeaders.indexOf(colDept) : -1;
+
+      metaColumns = {
+        name_col: colName || 'Name',
+        dept_col: colDept || ''
+      };
+
+      const total = parsedRawRows.length;
+      const digits = Math.max(3, String(total).length);
+
+      roster = parsedRawRows.map((row, i) => {
+        const reg_id = prefix + String(i + 1).padStart(digits, '0');
+        return {
+          reg_id,
+          name: idxName !== -1 ? String(row[idxName] || '').trim() : '',
+          department: idxDept !== -1 ? String(row[idxDept] || '').trim() : '',
+          attended: 0,
+          scanned_at: null
+        };
+      });
+
+      saveRosterToStorage();
+      alert(`Local Roster loaded: ${roster.length} participants (${roster[0].reg_id} – ${roster[roster.length - 1].reg_id})`);
+      switchTab('scan');
+    }
+
+    // ------------------------------------------------------------
+    // Local QR ZIP Generation & CSV Export
+    // ------------------------------------------------------------
+    async function generateQRCodesZip() {
+      if (!roster.length) { alert('Roster is empty. Load a sheet first.'); return; }
+
+      const btn = document.getElementById('btn-generate-zip');
+      const progress = document.getElementById('zip-progress');
+      btn.disabled = true;
+      progress.style.display = 'block';
+      progress.textContent = 'Generating... 0%';
+
+      try {
+        const zip = new JSZip();
+        const dummy = document.createElement('div');
+
+        for (let i = 0; i < roster.length; i++) {
+          const reg_id = roster[i].reg_id;
+          dummy.innerHTML = '';
+          new QRCode(dummy, { text: reg_id, width: 256, height: 256, correctLevel: QRCode.CorrectLevel.H });
+
+          await new Promise(r => setTimeout(r, 12));
+
+          const sourceCanvas = dummy.querySelector('canvas');
+          const sourceImg = dummy.querySelector('img');
+
+          const size = 300, pad = 24;
+          const finalCanvas = document.createElement('canvas');
+          finalCanvas.width = size; finalCanvas.height = size;
+          const ctx = finalCanvas.getContext('2d');
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, size, size);
+          if (sourceCanvas) ctx.drawImage(sourceCanvas, pad, pad, size - pad*2, size - pad*2);
+          else if (sourceImg) ctx.drawImage(sourceImg, pad, pad, size - pad*2, size - pad*2);
+
+          const base64 = finalCanvas.toDataURL('image/png').split(',')[1];
+          zip.file(`${reg_id}.png`, base64, { base64: true });
+          progress.textContent = `Generating... ${Math.round(((i + 1) / roster.length) * 100)}%`;
+        }
+
+        progress.textContent = 'Packaging...';
+        const blob = await zip.generateAsync({ type: 'blob' });
+        downloadBlob(blob, 'qr_codes.zip');
+        progress.textContent = 'Done — saved to Downloads.';
+      } catch (err) {
+        alert('Error: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function exportAttendanceCSV() {
+      if (!roster.length) { alert('Roster is empty.'); return; }
+      const nameLabel = (metaColumns.name_col || 'Name').replace(/"/g, '""');
+      const deptLabel = (metaColumns.dept_col || '').replace(/"/g, '""');
+
+      let csv = 'Registration ID,"' + nameLabel + '"';
+      if (deptLabel) csv += ',"' + deptLabel + '"';
+      csv += ',Attended,Scanned At\n';
+
+      roster.forEach(r => {
+        let row = `"${r.reg_id}","${(r.name||'').replace(/"/g,'""')}"`;
+        if (deptLabel) row += `,"${(r.department||'').replace(/"/g,'""')}"`;
+        row += `,"${r.attended ? 'Yes' : 'No'}","${r.scanned_at || ''}"\n`;
+        csv += row;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      downloadBlob(blob, `attendance_${ts}.csv`);
+    }
+
+    function downloadBlob(blob, filename) {
+      const mimeType = blob.type || 'application/octet-stream';
+      if (window.AndroidBridge && window.AndroidBridge.saveFile) {
+        const reader = new FileReader();
+        reader.onloadend = function() {
+          window.AndroidBridge.saveFile(reader.result.split(',')[1], filename, mimeType);
+        };
+        reader.readAsDataURL(blob);
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function clearAllData() {
+      if (confirm('Delete all local participant records, attendance and pending queue?')) {
+        roster = [];
+        counts.dup = 0;
+        lastCheckedIn = null;
+        document.getElementById('btn-undo').disabled = true;
+        showAbsentOnly = false;
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(META_KEY);
+        localStorage.removeItem(QUEUE_KEY);
+        metaColumns = { name_col: 'Name', dept_col: 'Department' };
+        clearHistory();
+        updateStatsAndUI();
+        updateQueueUI();
+      }
+    }
+
+    // Init
+    window.addEventListener('DOMContentLoaded', () => {
+      loadCloudConfig();
+      loadRosterFromStorage();
+      startScanner(currentFacingMode);
+    });
+  </script>
+
+</body>
+</html>

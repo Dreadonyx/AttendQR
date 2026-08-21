@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AttendQR — Map Columns & Settings</title>
+  <meta name="description" content="Map spreadsheet columns, configure Registration ID format, and select extra fields." />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <style>
+    .checkbox-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.4rem;
+      max-height: 180px;
+      overflow-y: auto;
+      padding: 0.5rem;
+      background: var(--bg-input, #0d1117);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.85rem;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .checkbox-item input[type="checkbox"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="{{ url_for('index') }}" class="nav-brand">
+      <span class="brand-icon">📋</span> AttendQR
+    </a>
+    <div class="nav-links">
+      <a href="{{ url_for('index') }}">Upload</a>
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('scan') }}">Scanner</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container">
+  <div class="page-header">
+    <h1>Map Columns &amp; ID Configuration</h1>
+    <p>
+      Found <strong>{{ row_count }}</strong> data row{{ 's' if row_count != 1 else '' }} and
+      <strong>{{ headers|length }}</strong> column{{ 's' if headers|length != 1 else '' }}.
+      Map the primary fields and configure Registration IDs.
+    </p>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul class="flash-list">
+        {% for category, message in messages %}
+          <li class="flash flash-{{ category }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <div class="card">
+    <div class="card-title">🗂️ Required Column Mapping</div>
+
+    <form method="POST" action="{{ url_for('mapping') }}" id="mapping-form">
+
+      <div class="mapping-grid">
+
+        <div class="form-group">
+          <label class="form-label" for="col_name">👤 Primary Name Column</label>
+          <select id="col_name" name="col_name" class="form-select" required>
+            <option value="">— select —</option>
+            {% for h in headers %}
+              <option value="{{ h }}">{{ h }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="col_email">✉️ Email Column</label>
+          <select id="col_email" name="col_email" class="form-select" required>
+            <option value="">— select —</option>
+            {% for h in headers %}
+              <option value="{{ h }}">{{ h }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="col_dept">🏢 Department / Org Column</label>
+          <select id="col_dept" name="col_dept" class="form-select" required>
+            <option value="">— select —</option>
+            {% for h in headers %}
+              <option value="{{ h }}">{{ h }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+      </div>
+
+      <div class="card-title" style="margin-top:1.25rem;">🏷️ Registration ID Format</div>
+      <div class="mapping-grid">
+        <div class="form-group">
+          <label class="form-label" for="id_prefix">ID Prefix (optional)</label>
+          <input type="text" id="id_prefix" name="id_prefix" class="form-select" placeholder="e.g. AAZHI-, RP0, CYV26-" oninput="updatePreview()" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="id_width">Digit Zero-Padding Width (optional)</label>
+          <input type="number" id="id_width" name="id_width" class="form-select" placeholder="Auto (e.g. 3 or 4)" min="1" max="10" oninput="updatePreview()" />
+        </div>
+      </div>
+      <div style="font-size:0.85rem; color:var(--text-muted); margin-top:-0.3rem; margin-bottom:1rem;">
+        Preview: <code id="id-preview" style="color:var(--accent);font-weight:700;">001, 002, 003</code>
+      </div>
+
+      <div class="card-title" style="margin-top:1rem;">➕ Extra Columns to Preserve (optional)</div>
+      <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:0.4rem;">
+        Tick any extra columns you wish to retain in the dashboard and final CSV export (e.g. Phone, Team, College, Year).
+      </p>
+      <div class="checkbox-grid">
+        {% for h in headers %}
+          <label class="checkbox-item" id="label-extra-{{ loop.index }}">
+            <input type="checkbox" name="extra_cols" value="{{ h }}" />
+            <span>{{ h }}</span>
+          </label>
+        {% endfor %}
+      </div>
+
+      <div class="card" style="margin-top:1rem; padding:0.9rem; background:rgba(88,166,255,.06); border-color:rgba(88,166,255,.25);">
+        <p style="font-size:.85rem; color:var(--text-muted); margin:0;">
+          ⚠️ <strong style="color:var(--text)">This will replace any existing roster.</strong>
+          Registration IDs are assigned in the exact order participants appear in the sheet.
+        </p>
+      </div>
+
+      <div class="flex gap-2 flex-wrap mt-3">
+        <button type="submit" class="btn btn-primary btn-lg" id="confirm-btn">
+          ✅ Confirm Mapping &amp; Generate Roster
+        </button>
+        <a href="{{ url_for('index') }}" class="btn btn-outline">← Back</a>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Column preview -->
+  <div class="card">
+    <div class="card-title">🔍 All Detected Columns in Uploaded Sheet</div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Column Header</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in headers %}
+          <tr>
+            <td class="text-muted">{{ loop.index }}</td>
+            <td>{{ h }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+  const headers = {{ headers | tojson }};
+  const totalRows = {{ row_count }};
+
+  function autoSelect(selectId, keywords) {
+    const sel = document.getElementById(selectId);
+    const lower = headers.map(h => h.toLowerCase());
+    for (const kw of keywords) {
+      const idx = lower.findIndex(h => h.includes(kw));
+      if (idx !== -1) { sel.value = headers[idx]; break; }
+    }
+  }
+
+  // Broadened keyword detection
+  autoSelect('col_name',  ['full name', 'your name', 'student name', 'candidate name', 'participant name', 'name', 'participant', 'student', 'candidate']);
+  autoSelect('col_email', ['email address', 'email id', 'e-mail', 'mail id', 'email', 'mail']);
+  autoSelect('col_dept',  ['department', 'dept', 'branch', 'faculty', 'school', 'college', 'institution', 'organisation', 'organization', 'company', 'year', 'class', 'role', 'stream', 'section']);
+
+  function updatePreview() {
+    const prefix = (document.getElementById('id_prefix').value || '').trim();
+    const widthVal = parseInt(document.getElementById('id_width').value, 10);
+    const width = (!isNaN(widthVal) && widthVal > 0) ? widthVal : Math.max(3, String(totalRows || 10).length);
+
+    const s1 = prefix + String(1).padStart(width, '0');
+    const s2 = prefix + String(2).padStart(width, '0');
+    const s3 = prefix + String(3).padStart(width, '0');
+    document.getElementById('id-preview').textContent = `${s1}, ${s2}, ${s3}...`;
+  }
+
+  updatePreview();
+
+  document.getElementById('mapping-form').addEventListener('submit', function() {
+    const btn = document.getElementById('confirm-btn');
+    btn.textContent = '⏳ Building roster…';
+    btn.disabled = true;
+  });
+</script>
+
+</body>
+</html>
+
