@@ -103,6 +103,8 @@ class DBWrapper:
             pass
         if self.is_postgres and pg_pool is not None:
             try:
+                # Rollback any pending transaction state to keep connection clean for next borrow
+                self.conn.rollback()
                 pg_pool.putconn(self.conn)
             except Exception:
                 pass
