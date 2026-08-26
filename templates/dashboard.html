@@ -180,6 +180,10 @@
       <a href="{{ url_for('dashboard') }}" class="active">Dashboard</a>
       <a href="{{ url_for('scan') }}">Scanner</a>
       <a href="{{ url_for('download_apk') }}" class="btn btn-outline btn-sm" style="margin-left:0.5rem;">📱 Download APK</a>
+      <form method="POST" action="{{ url_for('logout') }}" style="display:inline;margin-left:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="btn btn-outline btn-sm">Sign Out</button>
+      </form>
     </div>
   </div>
 </nav>
@@ -200,6 +204,7 @@
 
     <div style="display:flex;align-items:center;gap:0.5rem;">
       <form method="POST" action="" id="switch-event-form" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <select id="event-select" class="form-select" style="padding:0.35rem 0.7rem;font-size:0.82rem;" onchange="switchEvent(this.value)">
           {% for ev in events %}
             <option value="{{ ev['id'] }}" {% if active_event and active_event['id'] == ev['id'] %}selected{% endif %}>
@@ -270,6 +275,7 @@
   <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.25rem;">
     <div class="card-title" style="margin-bottom:0.6rem;">➕ Add Late Registration</div>
     <form method="POST" action="{{ url_for('api_add_participant', event_id=active_event['id'] if active_event else 'default-event') }}" class="late-reg-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <input type="text" name="name" placeholder="Full Name *" required />
       <input type="email" name="email" placeholder="Email Address *" required />
       <input type="text" name="department" placeholder="Department / Branch *" required />
@@ -285,6 +291,7 @@
     <div class="flex gap-2 flex-wrap items-center">
       <a href="{{ url_for('scan') }}" class="btn btn-success">📷 Open Mobile Scanner</a>
       <form method="POST" action="{{ url_for('generate_qr_zip', event_id=active_event['id'] if active_event else 'default-event') }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <button type="submit" class="btn btn-primary">📦 Download All QRs ZIP</button>
       </form>
     </div>
@@ -339,6 +346,7 @@
       Create an isolated event with custom ID format and scanner access code.
     </p>
     <form method="POST" action="{{ url_for('api_create_event') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div class="form-group" style="margin-bottom:0.75rem;">
         <label class="form-label">Event Name *</label>
         <input type="text" name="name" class="form-control" placeholder="e.g. Aazhi CTF 2027, Workshop" required />
@@ -447,12 +455,57 @@
         </td>
         <td style="color:var(--text-muted);font-size:.82rem">${formatTime(r.scanned_at)}</td>
         <td style="color:var(--text-dim);font-size:.78rem;font-family:monospace;">${escHtml(r.scanned_by_device_name || '—')}</td>
-        <td style="text-align:center;">
+        <td style="text-align:center;white-space:nowrap;">
           <a href="/api/events/${encodeURIComponent(currentEventId)}/qr/${encodeURIComponent(r.reg_id)}" class="btn btn-outline btn-sm" title="Download QR Pass for ${escHtml(r.reg_id)}" style="padding:.2rem .5rem;text-decoration:none;font-size:0.75rem;">⬇️</a>
+          ${r.attended ? `<button type="button" class="btn btn-outline btn-sm js-undo" data-reg="${escHtml(r.reg_id)}" data-name="${escHtml(r.name)}" title="Undo check-in for ${escHtml(r.name)}" style="padding:.2rem .5rem;font-size:0.75rem;">↩️</button>` : ''}
         </td>
       </tr>
     `).join('');
   }
+
+  // ---- Attendance correction & device revocation -------------------------
+  const CSRF_TOKEN = "{{ csrf_token() }}";
+
+  async function postAdmin(url) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': CSRF_TOKEN, 'Accept': 'application/json' },
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(data.message || `Request failed (${res.status})`);
+    return data;
+  }
+
+  document.addEventListener('click', async (e) => {
+    const undoBtn = e.target.closest('.js-undo');
+    if (undoBtn) {
+      e.preventDefault();
+      const reg = undoBtn.dataset.reg;
+      if (!confirm(`Undo the check-in for ${undoBtn.dataset.name} (${reg})?\n\nThey will be able to scan in again.`)) return;
+      undoBtn.disabled = true;
+      try {
+        await postAdmin(`/api/events/${encodeURIComponent(currentEventId)}/participants/${encodeURIComponent(reg)}/undo`);
+        await fetchStatsAndRoster();
+      } catch (err) {
+        alert(err.message);
+        undoBtn.disabled = false;
+      }
+      return;
+    }
+
+    const revokeLink = e.target.closest('.js-revoke');
+    if (revokeLink) {
+      e.preventDefault();
+      const device = revokeLink.dataset.device;
+      if (!confirm(`Revoke access for "${revokeLink.dataset.name}"?\n\nThat phone must re-enter the access code to scan again.`)) return;
+      try {
+        await postAdmin(`/api/events/${encodeURIComponent(currentEventId)}/scanners/${encodeURIComponent(device)}/revoke`);
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+  });
 
   function escHtml(s) {
     return String(s || '')
@@ -515,6 +568,7 @@
               <div style="font-size:0.72rem;color:var(--text-muted);">
                 ${s.is_online ? '<span style="color:var(--success)">Online</span>' : 'Offline'}
                 ${s.pending_sync_count > 0 ? ` &middot; <span style="color:var(--warning)">${s.pending_sync_count} pending</span>` : ''}
+                &middot; <a href="#" class="js-revoke" data-device="${escHtml(s.device_id)}" data-name="${escHtml(s.device_name)}" style="color:var(--text-dim);">revoke</a>
               </div>
             </div>
           `).join('');

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AttendQR — Admin Sign In</title>
+  <meta name="description" content="Sign in to the AttendQR admin console." />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <span class="nav-brand"><span class="brand-icon">📋</span> AttendQR Cloud</span>
+    <div class="nav-links">
+      <a href="{{ url_for('scan') }}">Scanner</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container" style="max-width:420px;">
+  <div class="page-header">
+    <h1>Admin Sign In</h1>
+    <p>The console manages rosters, exports and events.</p>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul class="flash-list">
+        {% for category, message in messages %}
+          <li class="flash flash-{{ category }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <div class="card">
+    <form method="POST" action="{{ url_for('login') }}{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}">
+      <div class="form-group">
+        <label class="form-label" for="password">Admin password</label>
+        <input type="password" id="password" name="password" class="form-control"
+               autocomplete="current-password" autofocus required />
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;">Sign In</button>
+    </form>
+
+    <p style="margin-top:1rem;font-size:0.78rem;color:var(--text-dim);line-height:1.5;">
+      Set <code>ADMIN_PASSWORD</code> in the environment to choose the password.
+      If it is unset, a random one is printed to the server console at startup.
+    </p>
+  </div>
+
+  <p style="margin-top:1.25rem;font-size:0.82rem;color:var(--text-muted);">
+    Running a door? Volunteers do not need this password — send them to the
+    <a href="{{ url_for('scan') }}">scanner page</a> and give them the event code
+    and access code instead.
+  </p>
+</main>
+
+</body>
+</html>

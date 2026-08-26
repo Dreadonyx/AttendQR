@@ -44,6 +44,20 @@
       <a href="{{ url_for('index') }}">Upload</a>
       <a href="{{ url_for('dashboard') }}">Dashboard</a>
       <a href="{{ url_for('scan') }}">Scanner</a>
+      <form method="POST" action="{{ url_for('logout') }}" style="display:inline;margin-left:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      {% if already_attended %}
+      <div class="flash flash-error" style="margin-bottom:1rem;">
+        <strong>⚠️ {{ already_attended }} check-in(s) already recorded.</strong>
+        Replacing this roster permanently erases them.
+        <label style="display:block;margin-top:0.5rem;font-weight:600;">
+          <input type="checkbox" name="confirm_replace" value="1" required />
+          I understand — replace the roster and discard recorded attendance
+        </label>
+      </div>
+      {% endif %}
+        <button type="submit" class="btn btn-outline btn-sm">Sign Out</button>
+      </form>
     </div>
   </div>
 </nav>
@@ -72,6 +86,7 @@
     <div class="card-title">🗂️ Required Column Mapping</div>
 
     <form method="POST" action="{{ url_for('mapping') }}" id="mapping-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 
       <div class="mapping-grid">
 

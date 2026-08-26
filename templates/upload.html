@@ -19,6 +19,10 @@
       <a href="{{ url_for('dashboard') }}">Dashboard</a>
       <a href="{{ url_for('scan') }}">Scanner</a>
       <a href="{{ url_for('download_apk') }}" class="btn btn-outline btn-sm" style="margin-left:0.5rem;">📱 Download APK</a>
+      <form method="POST" action="{{ url_for('logout') }}" style="display:inline;margin-left:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="btn btn-outline btn-sm">Sign Out</button>
+      </form>
     </div>
   </div>
 </nav>
@@ -43,6 +47,7 @@
     <div class="card-title">📂 Select Target Event &amp; File</div>
 
     <form id="upload-form" method="POST" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       
       <div class="form-group" style="margin-bottom:1rem;">
         <label class="form-label" for="target_event_id">🎯 Target Event</label>

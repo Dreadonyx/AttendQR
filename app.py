@@ -41,13 +41,54 @@ import db
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "attendqr-cloud-dev-secret-change-me")
+
+DEBUG_MODE = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
+
+# A stable SECRET_KEY is required in production: a predictable key lets anyone
+# forge an admin session cookie. In debug we generate an ephemeral one.
+_secret = os.environ.get("SECRET_KEY", "").strip()
+if not _secret:
+    if not DEBUG_MODE:
+        print(
+            "WARNING: SECRET_KEY is not set. Generating an ephemeral key — "
+            "sessions will be invalidated on every restart and will not work "
+            "across multiple workers. Set SECRET_KEY in production."
+        )
+    _secret = secrets.token_urlsafe(48)
+app.secret_key = _secret
+
+# Reject oversized uploads before they are read into memory.
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "10"))
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+
+# Session cookie hardening. Secure is opt-in because the app is routinely run
+# over plain HTTP on a LAN; enable it behind TLS.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"),
+)
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"csv", "xlsx"}
+
+# Admin console password. Generated and printed once when unset so a fresh
+# install is never silently wide open.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
+if not ADMIN_PASSWORD:
+    ADMIN_PASSWORD = secrets.token_urlsafe(9)
+    print("=" * 62)
+    print(f"  AttendQR admin password (generated): {ADMIN_PASSWORD}")
+    print("  Set ADMIN_PASSWORD in the environment to choose your own.")
+    print("=" * 62)
+
+# Brute-force guard for scanner access codes: (ip -> [attempt timestamps])
+AUTH_MAX_ATTEMPTS = 10
+AUTH_WINDOW_SECONDS = 300
+_auth_attempts: Dict[str, List[float]] = {}
 
 # Initialize database schema and migrations on startup (works with Gunicorn & local)
 try:
@@ -58,12 +99,20 @@ except Exception as _init_err:
 
 @app.after_request
 def add_cors_and_security_headers(response):
+    # Wildcard CORS is needed so the offline APK (origin "null", it runs from
+    # file:///android_asset) can reach the API. Browsers refuse to attach
+    # cookies to a wildcard origin, so session-authenticated admin routes are
+    # not reachable cross-origin; scanner routes authenticate with a bearer
+    # token that a foreign site cannot read.
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = (
-        "Content-Type, Authorization, X-Scanner-Token, X-Device-ID, Bypass-Tunnel-Reminder"
+        "Content-Type, Authorization, X-Scanner-Token, X-Device-ID, X-CSRF-Token, Bypass-Tunnel-Reminder"
     )
     response.headers["Bypass-Tunnel-Reminder"] = "true"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
     return response
 
 
@@ -120,13 +169,14 @@ def get_default_or_active_event_id() -> str:
         session["active_event_id"] = ev["id"]
         return ev["id"]
 
-    # If no event exists, create a default one
+    # If no event exists, create a default one. The access code is random:
+    # a hardcoded default is a publicly known scanner credential.
     default_id = "default-event"
     database.execute("""
         INSERT INTO events (id, name, code, access_code, id_prefix, id_width, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT DO NOTHING
-    """, (default_id, "Aazhi CTF 2026", "AAZHI26", "SCAN123", "", 3, "active", now_utc_iso()))
+    """, (default_id, "Untitled Event", "EVENT1", secrets.token_hex(4).upper(), "", 3, "active", now_utc_iso()))
     database.commit()
     session["active_event_id"] = default_id
     return default_id
@@ -176,19 +226,208 @@ def get_authenticated_scanner() -> Optional[Dict[str, Any]]:
     return scanner
 
 
-def require_scanner_auth(f):
-    """Decorator to require valid scanner authentication token."""
+# ---------------------------------------------------------------------------
+# Authorization
+#
+# Two independent identities exist:
+#   * Admin      — session cookie, set by /login. Owns rosters, exports, events.
+#   * Scanner    — bearer token from /api/auth/scanner, scoped to ONE event.
+#                  May only record attendance for that event.
+# ---------------------------------------------------------------------------
+
+def is_admin() -> bool:
+    return bool(session.get("is_admin"))
+
+
+def wants_json() -> bool:
+    """True when the caller is an API client rather than a browser page."""
+    if request.is_json or request.path.startswith("/api/"):
+        return True
+    return "application/json" in (request.headers.get("Accept") or "")
+
+
+def require_admin(f):
+    """Admin session required. Redirects browsers to /login, 401s API callers."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        scanner = get_authenticated_scanner()
-        if not scanner:
-            # Check if web session is authenticated or active
-            if "active_event_id" in session:
-                return f(*args, **kwargs)
-            return jsonify({"status": "unauthorized", "error": "Scanner authentication token required"}), 401
-        g.scanner = scanner
+        if not is_admin():
+            if wants_json():
+                return jsonify({"status": "unauthorized", "message": "Admin authentication required"}), 401
+            return redirect(url_for("login", next=request.full_path))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def scanner_for_event(event_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Return the authenticated scanner ONLY if its token was issued for this
+    event. A token for event A must never write attendance into event B.
+    """
+    scanner = get_authenticated_scanner()
+    if scanner and str(scanner["event_id"]) == str(event_id):
+        return scanner
+    return None
+
+
+def require_scanner_or_admin(event_id: str):
+    """
+    Returns (scanner_or_None, error_response_or_None).
+
+    A valid event-scoped scanner token OR an admin session grants access.
+    Anything else is rejected — an anonymous caller on the network can no
+    longer mark attendance.
+    """
+    scanner = scanner_for_event(event_id)
+    if scanner:
+        return scanner, None
+    if is_admin():
+        return None, None
+    if get_authenticated_scanner():
+        return None, (jsonify({
+            "status": "forbidden",
+            "message": "This scanner token belongs to a different event",
+        }), 403)
+    return None, (jsonify({
+        "status": "unauthorized",
+        "message": "Scanner token or admin session required",
+    }), 401)
+
+
+# ---------------------------------------------------------------------------
+# CSRF protection for browser form posts
+#
+# Bearer-token API calls are exempt: a cross-site page cannot read the token,
+# and browsers will not attach it automatically. Cookie-authenticated form
+# posts are the only CSRF-reachable surface, so those carry a token.
+# ---------------------------------------------------------------------------
+
+def csrf_token() -> str:
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": csrf_token, "is_admin": is_admin()}
+
+
+@app.before_request
+def enforce_csrf_on_form_posts():
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return None
+    # API clients authenticate with a bearer token, which is not auto-attached.
+    if get_authenticated_scanner() or request.is_json:
+        return None
+    if request.path in ("/api/auth/scanner", "/login"):
+        return None
+    # CSRF only protects actions that a cookie already authorizes. With no admin
+    # session there is no privilege to ride on, and require_admin answers with a
+    # more accurate 401.
+    if not is_admin():
+        return None
+
+    sent = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRF-Token", "")
+    )
+    expected = session.get("_csrf_token", "")
+    if not expected or not sent or not secrets.compare_digest(str(sent), str(expected)):
+        if wants_json():
+            return jsonify({"status": "error", "message": "CSRF token missing or invalid"}), 400
+        flash("Your session expired — please retry that action.", "error")
+        return redirect(request.referrer or url_for("index"))
+    return None
+
+
+def rate_limited(bucket: str) -> bool:
+    """
+    Sliding-window check for credential endpoints.
+
+    Only *failed* attempts count, and a success clears the bucket — otherwise
+    normal use locks out the legitimate operator.
+    """
+    now = datetime.now(timezone.utc).timestamp()
+    attempts = [t for t in _auth_attempts.get(bucket, []) if now - t < AUTH_WINDOW_SECONDS]
+    if attempts:
+        _auth_attempts[bucket] = attempts
+    else:
+        _auth_attempts.pop(bucket, None)
+    return len(attempts) >= AUTH_MAX_ATTEMPTS
+
+
+def record_auth_failure(bucket: str) -> None:
+    _auth_attempts.setdefault(bucket, []).append(datetime.now(timezone.utc).timestamp())
+
+
+def clear_auth_failures(bucket: str) -> None:
+    _auth_attempts.pop(bucket, None)
+
+
+# ---------------------------------------------------------------------------
+# Input sanitisation
+# ---------------------------------------------------------------------------
+
+def safe_int(value: Any, default: int = 0, low: Optional[int] = None, high: Optional[int] = None) -> int:
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        n = default
+    if low is not None:
+        n = max(low, n)
+    if high is not None:
+        n = min(high, n)
+    return n
+
+
+def sanitize_csv_cell(value: Any) -> str:
+    """
+    Neutralise spreadsheet formula injection. A roster cell beginning with
+    = + - @ (or tab/CR) is executed as a formula by Excel/Sheets when the
+    exported CSV is opened, so prefix it with an apostrophe.
+    """
+    text = "" if value is None else str(value)
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
+
+
+def clean_client_timestamp(raw: Any) -> str:
+    """
+    Scanners report when a scan happened so offline queues keep their real
+    time. Reject anything unparseable or implausible (bad device clock,
+    hand-crafted payload) and fall back to server time.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return now_utc_iso()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return now_utc_iso()
+
+    now = datetime.now(timezone.utc)
+    # More than 5 minutes ahead, or older than 30 days: not credible.
+    if parsed > now.replace(microsecond=0) and (parsed - now).total_seconds() > 300:
+        return now_utc_iso()
+    if (now - parsed).total_seconds() > 30 * 24 * 3600:
+        return now_utc_iso()
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def prune_stale_uploads(max_age_seconds: int = 6 * 3600) -> None:
+    """Abandoned mapping flows leave temp sheets behind; clear the old ones."""
+    try:
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age_seconds
+        for path in UPLOAD_DIR.iterdir():
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def parse_csv_bytes(data: bytes) -> tuple[list[str], list[list[str]]]:
@@ -234,13 +473,25 @@ def api_auth_scanner():
     if not event_code or not access_code:
         return jsonify({"status": "error", "message": "Event code and access code are required"}), 400
 
+    # Access codes are short and human-transcribed, so throttle guessing.
+    bucket = f"auth:{request.remote_addr}"
+    if rate_limited(bucket):
+        return jsonify({
+            "status": "error",
+            "message": "Too many authentication attempts. Wait a few minutes and try again.",
+        }), 429
+
     database = get_db()
     event = database.fetchone("SELECT * FROM events WHERE UPPER(code) = ? AND status = 'active'", (event_code,))
     if not event:
-        return jsonify({"status": "error", "message": f"Event '{event_code}' not found or inactive"}), 404
+        record_auth_failure(bucket)
+        return jsonify({"status": "error", "message": "Invalid event code or access code"}), 401
 
-    if event["access_code"] != access_code:
-        return jsonify({"status": "error", "message": "Invalid scanner access code"}), 401
+    if not secrets.compare_digest(str(event["access_code"]), access_code):
+        record_auth_failure(bucket)
+        return jsonify({"status": "error", "message": "Invalid event code or access code"}), 401
+
+    clear_auth_failures(bucket)
 
     token = generate_token()
     now_ts = now_utc_iso()
@@ -289,6 +540,7 @@ def api_auth_scanner():
 # ---------------------------------------------------------------------------
 
 @app.route("/api/events", methods=["GET"])
+@require_admin
 def api_get_events():
     """List all events with summary stats."""
     database = get_db()
@@ -330,6 +582,7 @@ def api_get_events():
 
 
 @app.route("/api/events", methods=["POST"])
+@require_admin
 def api_create_event():
     """Create a new event."""
     payload = request.get_json(silent=True) or request.form
@@ -337,11 +590,18 @@ def api_create_event():
     code = str(payload.get("code", "")).strip().upper()
     access_code = str(payload.get("access_code", "")).strip() or "SCAN123"
     id_prefix = str(payload.get("id_prefix", "")).strip()
-    id_width_raw = str(payload.get("id_width", "3")).strip()
-    id_width = int(id_width_raw) if id_width_raw.isdigit() else 3
+    id_width = safe_int(payload.get("id_width", 3), default=3, low=1, high=12)
 
     if not name or not code:
         return jsonify({"status": "error", "message": "Event name and event code are required"}), 400
+
+    if not re.fullmatch(r"[A-Z0-9_-]{2,32}", code):
+        return jsonify({
+            "status": "error",
+            "message": "Event code must be 2-32 characters of A-Z, 0-9, dash or underscore",
+        }), 400
+    if len(access_code) < 4:
+        return jsonify({"status": "error", "message": "Access code must be at least 4 characters"}), 400
 
     database = get_db()
     existing = database.fetchone("SELECT id FROM events WHERE UPPER(code) = ?", (code,))
@@ -363,6 +623,7 @@ def api_create_event():
 
 
 @app.route("/api/events/<event_id>/select", methods=["POST"])
+@require_admin
 def api_select_event(event_id):
     """Set active event in session."""
     database = get_db()
@@ -389,11 +650,17 @@ def api_event_scan(event_id):
     payload = request.get_json(silent=True) or {}
     reg_id = str(payload.get("reg_id", "")).strip()
     scan_id = str(payload.get("scan_id", "")).strip() or str(uuid.uuid4())
-    client_scanned_at = str(payload.get("scanned_at", "")).strip() or now_utc_iso()
+    client_scanned_at = clean_client_timestamp(payload.get("scanned_at"))
 
-    scanner = get_authenticated_scanner()
-    device_id = scanner["device_id"] if scanner else payload.get("device_id", "web-scanner")
-    device_name = scanner["device_name"] if scanner else payload.get("device_name", "Web Client")
+    # Only a scanner holding a token for THIS event (or an admin) may check
+    # people in. Previously any caller on the network could, and a token
+    # issued for one event was accepted for every other event.
+    scanner, auth_error = require_scanner_or_admin(event_id)
+    if auth_error:
+        return auth_error
+
+    device_id = scanner["device_id"] if scanner else str(payload.get("device_id") or "web-admin")
+    device_name = scanner["device_name"] if scanner else str(payload.get("device_name") or "Admin Console")
 
     if not reg_id:
         return jsonify({"status": "not_found", "message": "Missing registration ID"}), 200
@@ -403,6 +670,26 @@ def api_event_scan(event_id):
     event = database.fetchone("SELECT id FROM events WHERE id = ?", (event_id,))
     if not event:
         return jsonify({"status": "error", "message": "Event not found"}), 404
+
+    # Replaying the same scan_id (network retry) must not append another log row.
+    prior = database.fetchone(
+        "SELECT status FROM attendance_logs WHERE event_id = ? AND scan_id = ?",
+        (event_id, scan_id),
+    )
+    if prior:
+        part_prior = database.fetchone(
+            "SELECT reg_id, name, department, scanned_at, scanned_by_device_name FROM participants WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)",
+            (event_id, reg_id),
+        )
+        response = {"status": prior["status"], "reg_id": reg_id, "replayed": True}
+        if part_prior:
+            response.update({
+                "name": part_prior["name"],
+                "department": part_prior["department"],
+                "scanned_at": part_prior["scanned_at"],
+                "scanner": part_prior["scanned_by_device_name"] or device_name,
+            })
+        return jsonify(response), 200
 
     # Update scanner heartbeat if scanner authenticated
     if scanner:
@@ -427,20 +714,26 @@ def api_event_scan(event_id):
         database.commit()
         return jsonify({"status": "not_found", "reg_id": reg_id}), 200
 
-    # 2. Check if already attended
+    # 2. Claim the check-in.
+    #
+    # The WHERE attended = 0 clause is what makes concurrent scans safe, but
+    # only if we act on its RESULT: two devices can both pass the read above,
+    # and the loser's UPDATE matches zero rows. Reading rowcount is what turns
+    # that into a "duplicate" answer instead of a second "ok".
+    claimed = False
     if part["attended"] == 0:
-        # Atomic update with WHERE attended = 0 condition
-        database.execute("""
+        cursor = database.execute("""
             UPDATE participants
             SET attended = 1, scanned_at = ?, scanned_by_device_id = ?, scanned_by_device_name = ?, scan_id = ?
             WHERE event_id = ? AND LOWER(reg_id) = LOWER(?) AND attended = 0
         """, (client_scanned_at, device_id, device_name, scan_id, event_id, reg_id))
+        claimed = (cursor.rowcount or 0) > 0
 
-        log_id = str(uuid.uuid4())
+    if claimed:
         database.execute("""
             INSERT INTO attendance_logs (id, event_id, participant_id, reg_id, device_id, device_name, scan_id, status, scanned_at, synced_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (log_id, event_id, part["id"], part["reg_id"], device_id, device_name, scan_id, "ok", client_scanned_at, now_utc_iso()))
+        """, (str(uuid.uuid4()), event_id, part["id"], part["reg_id"], device_id, device_name, scan_id, "ok", client_scanned_at, now_utc_iso()))
         database.commit()
 
         return jsonify({
@@ -451,23 +744,27 @@ def api_event_scan(event_id):
             "scanned_at": client_scanned_at,
             "scanner": device_name,
         }), 200
-    else:
-        # Already scanned earlier
-        log_id = str(uuid.uuid4())
-        database.execute("""
-            INSERT INTO attendance_logs (id, event_id, participant_id, reg_id, device_id, device_name, scan_id, status, scanned_at, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (log_id, event_id, part["id"], part["reg_id"], device_id, device_name, scan_id, "duplicate", client_scanned_at, now_utc_iso()))
-        database.commit()
 
-        return jsonify({
-            "status": "duplicate",
-            "reg_id": part["reg_id"],
-            "name": part["name"],
-            "department": part["department"],
-            "scanned_at": part["scanned_at"],
-            "scanner": part["scanned_by_device_name"] or "Scanner",
-        }), 200
+    # Already present — either scanned earlier, or another device just won the
+    # race. Report the authoritative first scan, never our own attempt.
+    winner = database.fetchone(
+        "SELECT scanned_at, scanned_by_device_name FROM participants WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)",
+        (event_id, reg_id),
+    ) or {}
+    database.execute("""
+        INSERT INTO attendance_logs (id, event_id, participant_id, reg_id, device_id, device_name, scan_id, status, scanned_at, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (str(uuid.uuid4()), event_id, part["id"], part["reg_id"], device_id, device_name, scan_id, "duplicate", client_scanned_at, now_utc_iso()))
+    database.commit()
+
+    return jsonify({
+        "status": "duplicate",
+        "reg_id": part["reg_id"],
+        "name": part["name"],
+        "department": part["department"],
+        "scanned_at": winner.get("scanned_at") or part["scanned_at"],
+        "scanner": winner.get("scanned_by_device_name") or part["scanned_by_device_name"] or "Scanner",
+    }), 200
 
 
 @app.route("/api/events/<event_id>/sync", methods=["POST"])
@@ -481,10 +778,17 @@ def api_event_sync(event_id):
     device_id = str(payload.get("device_id", "")).strip() or "offline-scanner"
     device_name = str(payload.get("device_name", "")).strip() or "Offline Scanner"
 
-    scanner = get_authenticated_scanner()
+    scanner, auth_error = require_scanner_or_admin(event_id)
+    if auth_error:
+        return auth_error
     if scanner:
         device_id = scanner["device_id"]
         device_name = scanner["device_name"]
+
+    if not isinstance(scans, list):
+        return jsonify({"status": "error", "message": "'scans' must be a list"}), 400
+    if len(scans) > 5000:
+        return jsonify({"status": "error", "message": "Too many scans in one batch (max 5000)"}), 413
 
     database = get_db()
     event = database.fetchone("SELECT id FROM events WHERE id = ?", (event_id,))
@@ -495,9 +799,11 @@ def api_event_sync(event_id):
     now_sync = now_utc_iso()
 
     for item in scans:
+        if not isinstance(item, dict):
+            continue
         reg_id = str(item.get("reg_id", "")).strip()
         scan_id = str(item.get("scan_id", "")).strip() or str(uuid.uuid4())
-        scanned_at = str(item.get("scanned_at", "")).strip() or now_sync
+        scanned_at = clean_client_timestamp(item.get("scanned_at"))
 
         if not reg_id:
             results.append({"scan_id": scan_id, "reg_id": reg_id, "status": "not_found"})
@@ -526,14 +832,18 @@ def api_event_sync(event_id):
             results.append({"scan_id": scan_id, "reg_id": reg_id, "status": "not_found"})
             continue
 
+        claimed = False
         if part["attended"] == 0:
-            # Mark official attendance
-            database.execute("""
+            # Same rowcount rule as the live scan path: only the UPDATE that
+            # actually matched a row may be reported as an official check-in.
+            cursor = database.execute("""
                 UPDATE participants
                 SET attended = 1, scanned_at = ?, scanned_by_device_id = ?, scanned_by_device_name = ?, scan_id = ?
                 WHERE event_id = ? AND LOWER(reg_id) = LOWER(?) AND attended = 0
             """, (scanned_at, device_id, device_name, scan_id, event_id, reg_id))
+            claimed = (cursor.rowcount or 0) > 0
 
+        if claimed:
             log_id = str(uuid.uuid4())
             database.execute("""
                 INSERT INTO attendance_logs (id, event_id, participant_id, reg_id, device_id, device_name, scan_id, status, scanned_at, synced_at)
@@ -583,12 +893,12 @@ def api_event_sync(event_id):
 def api_event_heartbeat(event_id):
     """Update scanner online status and reported pending sync count."""
     payload = request.get_json(silent=True) or {}
-    pending_count = int(payload.get("pending_count", 0))
-    status_str = str(payload.get("status", "online")).strip()
+    pending_count = safe_int(payload.get("pending_count", 0), default=0, low=0, high=1_000_000)
+    status_str = str(payload.get("status", "online")).strip()[:32] or "online"
 
-    scanner = get_authenticated_scanner()
+    scanner = scanner_for_event(event_id)
     if not scanner:
-        return jsonify({"status": "unauthorized"}), 401
+        return jsonify({"status": "unauthorized", "message": "Valid scanner token for this event required"}), 401
 
     database = get_db()
     database.execute("""
@@ -604,6 +914,10 @@ def api_event_heartbeat(event_id):
 @app.route("/api/events/<event_id>/stats", methods=["GET"])
 def api_event_stats(event_id):
     """Live summary statistics, scanner statuses, and recent scans."""
+    _scanner, auth_error = require_scanner_or_admin(event_id)
+    if auth_error:
+        return auth_error
+
     database = get_db()
     event = database.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
     if not event:
@@ -673,7 +987,14 @@ def api_event_stats(event_id):
 def api_event_roster(event_id=None):
     """Return full roster with extra fields for the event."""
     if not event_id:
+        if not is_admin():
+            return jsonify({"status": "unauthorized", "message": "Admin authentication required"}), 401
         event_id = get_default_or_active_event_id()
+
+    # The roster is personal data (names + emails); never serve it anonymously.
+    _scanner, auth_error = require_scanner_or_admin(event_id)
+    if auth_error:
+        return auth_error
 
     database = get_db()
     event = database.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
@@ -716,15 +1037,26 @@ def api_event_roster(event_id=None):
 
 @app.route("/api/events/<event_id>/add-participant", methods=["POST"])
 @app.route("/add-participant", methods=["POST"])
+@require_admin
 def api_add_participant(event_id=None):
     """Insert a single late registration without wiping existing scans or roster."""
     if not event_id:
         event_id = get_default_or_active_event_id()
 
-    name = request.form.get("name", "").strip() or request.json.get("name", "").strip()
-    email = request.form.get("email", "").strip() or request.json.get("email", "").strip()
-    dept = request.form.get("department", "").strip() or request.json.get("department", "").strip()
-    custom_id = request.form.get("reg_id", "").strip() or (request.json.get("reg_id", "").strip() if request.is_json else "")
+    # Read from JSON or form without touching request.json on a form post —
+    # doing so raised a 415/400 and surfaced as a 500 whenever a form field
+    # was blank.
+    body = request.get_json(silent=True) if request.is_json else None
+    if not isinstance(body, dict):
+        body = {}
+
+    def field(key: str) -> str:
+        return (request.form.get(key) or body.get(key) or "").strip()
+
+    name = field("name")
+    email = field("email")
+    dept = field("department")
+    custom_id = field("reg_id")
 
     if not name or not email or not dept:
         if request.is_json:
@@ -732,7 +1064,20 @@ def api_add_participant(event_id=None):
         flash("Name, email and department are all required.", "error")
         return redirect(url_for("dashboard"))
 
+    if len(name) > 255 or len(email) > 255 or len(dept) > 255:
+        if request.is_json:
+            return jsonify({"status": "error", "message": "Field too long (max 255 characters)"}), 400
+        flash("Name, email and department must be 255 characters or fewer.", "error")
+        return redirect(url_for("dashboard"))
+
     database = get_db()
+    event_row = database.fetchone("SELECT id FROM events WHERE id = ?", (event_id,))
+    if not event_row:
+        if request.is_json:
+            return jsonify({"status": "error", "message": "Event not found"}), 404
+        flash("That event no longer exists.", "error")
+        return redirect(url_for("dashboard"))
+
     reg_id = custom_id if custom_id else next_reg_id_for_event(event_id)
 
     if database.fetchone("SELECT 1 FROM participants WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)", (event_id, reg_id)):
@@ -755,11 +1100,23 @@ def api_add_participant(event_id=None):
             extra[h] = val
 
     part_id = str(uuid.uuid4())
-    database.execute("""
-        INSERT INTO participants (id, event_id, reg_id, name, email, department, extra_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (part_id, event_id, reg_id, name, email, dept, json.dumps(extra) if extra else None, now_utc_iso()))
-    database.commit()
+    try:
+        database.execute("""
+            INSERT INTO participants (id, event_id, reg_id, name, email, department, extra_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (part_id, event_id, reg_id, name, email, dept, json.dumps(extra) if extra else None, now_utc_iso()))
+        database.commit()
+    except Exception:
+        # UNIQUE(event_id, reg_id): two simultaneous late adds computed the
+        # same next id. Surface a retryable message instead of a 500.
+        database.rollback()
+        if request.is_json:
+            return jsonify({
+                "status": "error",
+                "message": f"Registration ID {reg_id} was just taken — retry to get the next one",
+            }), 409
+        flash(f"Registration ID {reg_id} was just taken — please retry.", "error")
+        return redirect(url_for("dashboard"))
 
     if request.is_json:
         return jsonify({"status": "ok", "reg_id": reg_id, "name": name}), 201
@@ -770,6 +1127,7 @@ def api_add_participant(event_id=None):
 
 @app.route("/api/events/<event_id>/qr/<reg_id>")
 @app.route("/qr/<reg_id>")
+@require_admin
 def qr_single(reg_id, event_id=None):
     """Download one participant's QR PNG pass."""
     if not event_id:
@@ -798,6 +1156,7 @@ def qr_single(reg_id, event_id=None):
 
 @app.route("/api/events/<event_id>/generate-qr-zip", methods=["POST"])
 @app.route("/generate-qr-zip", methods=["POST"])
+@require_admin
 def generate_qr_zip(event_id=None):
     """Generate one QR PNG per roster row in the event, zip them, return for download."""
     if not event_id:
@@ -835,6 +1194,7 @@ def generate_qr_zip(event_id=None):
 
 @app.route("/api/events/<event_id>/export")
 @app.route("/export-roster")
+@require_admin
 def export_roster(event_id=None):
     """Download attendance CSV for the event."""
     if not event_id:
@@ -866,16 +1226,16 @@ def export_roster(event_id=None):
                 pass
         writer.writerow(
             [
-                row["reg_id"],
-                row["name"],
-                row["email"],
-                row["department"],
+                sanitize_csv_cell(row["reg_id"]),
+                sanitize_csv_cell(row["name"]),
+                sanitize_csv_cell(row["email"]),
+                sanitize_csv_cell(row["department"]),
             ]
-            + [extra.get(h, "") for h in extra_headers]
+            + [sanitize_csv_cell(extra.get(h, "")) for h in extra_headers]
             + [
                 "Yes" if row["attended"] else "No",
                 row["scanned_at"] or "",
-                row["scanned_by_device_name"] or "",
+                sanitize_csv_cell(row["scanned_by_device_name"] or ""),
             ]
         )
 
@@ -906,6 +1266,7 @@ def legacy_api_scan():
 # ---------------------------------------------------------------------------
 
 @app.route("/")
+@require_admin
 def index():
     """Upload & Event Selection page."""
     event_id = get_default_or_active_event_id()
@@ -916,6 +1277,7 @@ def index():
 
 
 @app.route("/upload", methods=["POST"])
+@require_admin
 def upload():
     """Receive file, parse headers & rows, store in session, redirect to mapping."""
     file = request.files.get("sheet")
@@ -929,6 +1291,7 @@ def upload():
 
     target_event_id = request.form.get("target_event_id") or get_default_or_active_event_id()
     session["upload_target_event_id"] = target_event_id
+    prune_stale_uploads()
 
     data = file.read()
     ext = file.filename.rsplit(".", 1)[1].lower()
@@ -946,6 +1309,20 @@ def upload():
         flash("The file appears to be empty.", "error")
         return redirect(url_for("index"))
 
+    # Column mapping identifies columns by header text, so duplicates would
+    # silently map to whichever came first.
+    seen: Dict[str, int] = {}
+    deduped: List[str] = []
+    for i, h in enumerate(headers):
+        label = (h or "").strip() or f"Column {i + 1}"
+        if label in seen:
+            seen[label] += 1
+            label = f"{label} ({seen[label]})"
+        else:
+            seen[label] = 1
+        deduped.append(label)
+    headers = deduped
+
     tmp_id = str(uuid.uuid4())
     tmp_path = UPLOAD_DIR / f"{tmp_id}.{ext}"
     tmp_path.write_bytes(data)
@@ -959,6 +1336,7 @@ def upload():
 
 
 @app.route("/mapping", methods=["GET", "POST"])
+@require_admin
 def mapping():
     """Column-mapping step — maps columns and populates participants for the event."""
     if "headers" not in session:
@@ -976,7 +1354,7 @@ def mapping():
         extra_cols = request.form.getlist("extra_cols")
         id_prefix = request.form.get("id_prefix", "").strip()
         id_width_raw = request.form.get("id_width", "").strip()
-        id_width = int(id_width_raw) if id_width_raw.isdigit() else None
+        id_width = safe_int(id_width_raw, default=3, low=1, high=12) if id_width_raw.isdigit() else None
 
         if not all([col_name, col_email, col_dept]):
             flash("Please select all three required column mappings.", "error")
@@ -1012,8 +1390,26 @@ def mapping():
         valid_extra_cols = [c for c in extra_cols if c in extra_idx]
         total = len(rows)
 
+        # Replacing a roster deletes recorded attendance with it, so require an
+        # explicit confirmation once anyone has been checked in.
+        attended_row = database.fetchone(
+            "SELECT COUNT(*) as cnt FROM participants WHERE event_id = ? AND attended = 1",
+            (event_id,),
+        )
+        already_attended = attended_row["cnt"] if attended_row else 0
+        if already_attended and request.form.get("confirm_replace") != "1":
+            flash(
+                f"This event already has {already_attended} recorded check-in(s). "
+                "Replacing the roster erases them — tick the confirmation box to proceed.",
+                "error",
+            )
+            return redirect(url_for("mapping"))
+
         # Clear existing participants for this event only
         database.execute("DELETE FROM participants WHERE event_id = ?", (event_id,))
+        # Detach audit rows from the participants that are going away; the log
+        # itself is kept as the historical record.
+        database.execute("UPDATE attendance_logs SET participant_id = NULL WHERE event_id = ?", (event_id,))
         created_at = now_utc_iso()
 
         for i, row in enumerate(rows, start=1):
@@ -1050,15 +1446,21 @@ def mapping():
         flash(f"Roster loaded: {total} participants for '{event['name'] if event else event_id}'.", "success")
         return redirect(url_for("dashboard"))
 
+    attended_row = database.fetchone(
+        "SELECT COUNT(*) as cnt FROM participants WHERE event_id = ? AND attended = 1",
+        (event_id,),
+    )
     return render_template(
         "mapping.html",
         headers=headers,
         row_count=session.get("row_count", 0),
         event=event,
+        already_attended=(attended_row["cnt"] if attended_row else 0),
     )
 
 
 @app.route("/dashboard")
+@require_admin
 def dashboard():
     """Live Admin Attendance Dashboard."""
     event_id = get_default_or_active_event_id()
@@ -1070,11 +1472,18 @@ def dashboard():
 
 @app.route("/scan")
 def scan():
-    """Mobile Scanner Web Page."""
+    """
+    Mobile scanner page. Deliberately public — volunteers open it on their own
+    phones — but it ships no roster data and no credentials. The scanner must
+    authenticate with the event code + access code to obtain a token before any
+    API call succeeds.
+    """
     event_id = get_default_or_active_event_id()
     database = get_db()
-    events = database.fetchall("SELECT * FROM events WHERE status = 'active' ORDER BY created_at DESC")
-    active_event = database.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+    events = database.fetchall(
+        "SELECT id, name, code FROM events WHERE status = 'active' ORDER BY created_at DESC"
+    )
+    active_event = database.fetchone("SELECT id, name, code FROM events WHERE id = ?", (event_id,))
     return render_template("scan.html", events=events, active_event=active_event)
 
 
@@ -1095,10 +1504,143 @@ def download_apk():
 
 
 # ---------------------------------------------------------------------------
+# Admin Session
+# ---------------------------------------------------------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Admin console sign-in."""
+    if request.method == "POST":
+        password = str(request.form.get("password", ""))
+        bucket = f"login:{request.remote_addr}"
+
+        if rate_limited(bucket):
+            flash("Too many sign-in attempts. Wait a few minutes and try again.", "error")
+            return render_template("login.html"), 429
+
+        if secrets.compare_digest(password, ADMIN_PASSWORD):
+            clear_auth_failures(bucket)
+            session.clear()          # new session id on privilege change
+            session["is_admin"] = True
+            session.permanent = False
+            target = request.args.get("next") or url_for("dashboard")
+            # Only ever redirect to a path on this site.
+            if not target.startswith("/") or target.startswith("//"):
+                target = url_for("dashboard")
+            return redirect(target)
+
+        record_auth_failure(bucket)
+        flash("Incorrect password.", "error")
+        return render_template("login.html"), 401
+
+    if is_admin():
+        return redirect(url_for("dashboard"))
+    return render_template("login.html")
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    flash("Signed out.", "success")
+    return redirect(url_for("login"))
+
+
+@app.route("/healthz")
+def healthz():
+    """Liveness probe for deployment platforms."""
+    try:
+        database = get_db()
+        database.fetchone("SELECT 1 as ok")
+        return jsonify({
+            "status": "ok",
+            "backend": "postgres" if db.IS_POSTGRES else "sqlite",
+            "time": now_utc_iso(),
+        }), 200
+    except Exception as exc:
+        return jsonify({"status": "degraded", "error": str(exc)[:200]}), 503
+
+
+# ---------------------------------------------------------------------------
+# Attendance Corrections & Device Management
+# ---------------------------------------------------------------------------
+
+@app.route("/api/events/<event_id>/participants/<reg_id>/undo", methods=["POST"])
+@require_admin
+def api_undo_attendance(event_id, reg_id):
+    """
+    Clear a mistaken check-in so the participant can be scanned again.
+    Without this, a wrong scan was permanent — the only remedy was replacing
+    the whole roster, which erased everyone else's attendance too.
+    """
+    database = get_db()
+    part = database.fetchone(
+        "SELECT * FROM participants WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)",
+        (event_id, reg_id),
+    )
+    if not part:
+        return jsonify({"status": "not_found", "message": "Participant not found in this event"}), 404
+
+    if not part["attended"]:
+        return jsonify({"status": "noop", "message": "Participant is not marked present", "reg_id": part["reg_id"]}), 200
+
+    database.execute("""
+        UPDATE participants
+        SET attended = 0, scanned_at = NULL, scanned_by_device_id = NULL,
+            scanned_by_device_name = NULL, scan_id = NULL
+        WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)
+    """, (event_id, reg_id))
+
+    # Keep the audit trail honest: record the reversal rather than deleting.
+    database.execute("""
+        INSERT INTO attendance_logs (id, event_id, participant_id, reg_id, device_id, device_name, scan_id, status, scanned_at, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        str(uuid.uuid4()), event_id, part["id"], part["reg_id"],
+        "admin-console", "Admin Console", str(uuid.uuid4()),
+        "undo", now_utc_iso(), now_utc_iso(),
+    ))
+    database.commit()
+
+    return jsonify({
+        "status": "ok",
+        "reg_id": part["reg_id"],
+        "name": part["name"],
+        "message": "Check-in reversed; participant may be scanned again",
+    }), 200
+
+
+@app.route("/api/events/<event_id>/scanners/<device_id>/revoke", methods=["POST"])
+@require_admin
+def api_revoke_scanner(event_id, device_id):
+    """
+    Invalidate a device's token — for a lost or handed-back phone. The device
+    must re-enter the access code to scan again.
+    """
+    database = get_db()
+    scanner = database.fetchone(
+        "SELECT id, device_name FROM scanners WHERE event_id = ? AND device_id = ?",
+        (event_id, device_id),
+    )
+    if not scanner:
+        return jsonify({"status": "not_found", "message": "Device not registered for this event"}), 404
+
+    # Replace the token with an unguessable value rather than NULL so the
+    # UNIQUE constraint holds and the old token can never be reused.
+    database.execute(
+        "UPDATE scanners SET token = ?, status = 'revoked', pending_sync_count = 0 WHERE id = ?",
+        (f"revoked-{uuid.uuid4()}", scanner["id"]),
+    )
+    database.commit()
+    return jsonify({"status": "ok", "device_id": device_id, "device_name": scanner["device_name"]}), 200
+
+
+# ---------------------------------------------------------------------------
 # Main Entry Point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     db.init_db()
-    port = int(os.environ.get("PORT", 5001))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    port = safe_int(os.environ.get("PORT", 5001), default=5001, low=1, high=65535)
+    # debug=True exposes the Werkzeug console, which is remote code execution
+    # for anyone who can reach the port. Opt in with FLASK_DEBUG=1 locally.
+    app.run(host="0.0.0.0", port=port, debug=DEBUG_MODE)

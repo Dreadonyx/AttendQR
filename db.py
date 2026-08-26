@@ -43,6 +43,30 @@ def get_pg_pool():
     return pg_pool
 
 
+def _connect_sqlite() -> sqlite3.Connection:
+    """
+    Open SQLite with settings suited to several scanners writing at once.
+
+    WAL lets the dashboard keep reading while a scan is being written, and a
+    busy timeout makes a brief lock wait instead of raising
+    "database is locked" in a volunteer's face mid-event.
+    """
+    conn = sqlite3.connect(
+        str(SQLITE_DB_PATH),
+        detect_types=sqlite3.PARSE_DECLTYPES,
+        timeout=10.0,
+    )
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.execute("PRAGMA foreign_keys=ON")
+    except sqlite3.Error:
+        pass
+    return conn
+
+
 class DBWrapper:
     """Wrapper that normalizes query execution and parameter binding across SQLite & PostgreSQL."""
     def __init__(self):
@@ -55,12 +79,10 @@ class DBWrapper:
                 self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
             else:
                 self.is_postgres = False
-                self.conn = sqlite3.connect(str(SQLITE_DB_PATH), detect_types=sqlite3.PARSE_DECLTYPES)
-                self.conn.row_factory = sqlite3.Row
+                self.conn = _connect_sqlite()
                 self.cursor = self.conn.cursor()
         else:
-            self.conn = sqlite3.connect(str(SQLITE_DB_PATH), detect_types=sqlite3.PARSE_DECLTYPES)
-            self.conn.row_factory = sqlite3.Row
+            self.conn = _connect_sqlite()
             self.cursor = self.conn.cursor()
 
     def _format_sql(self, sql: str) -> str:

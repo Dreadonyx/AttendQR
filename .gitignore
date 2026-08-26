@@ -1,5 +1,7 @@
 # Python
 attendqr.db
+attendqr.db-wal
+attendqr.db-shm
 __pycache__/
 *.pyc
 *.pyo

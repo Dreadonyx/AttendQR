@@ -14,16 +14,28 @@ import concurrent.futures
 import csv
 import io
 import json
+import os
 import uuid
 from datetime import datetime, timezone
+
+os.environ.setdefault("ADMIN_PASSWORD", "test-admin-password")
 
 import app
 import db
 
+ADMIN_PASSWORD = "test-admin-password"
+
+
 def test_full_cloud_suite():
     # Bootstrap DB
     db.init_db()
+    app.ADMIN_PASSWORD = ADMIN_PASSWORD
     client = app.app.test_client()
+
+    # Event management, rosters, QR passes and exports now require an admin
+    # session; scanners continue to use their own bearer tokens.
+    login = client.post('/login', data={'password': ADMIN_PASSWORD})
+    assert login.status_code == 302
 
     # -------------------------------------------------------------
     # 1. Multi-Event Creation & Isolation
