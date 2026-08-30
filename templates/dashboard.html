@@ -145,7 +145,7 @@
 
     .empty-state .empty-icon { font-size: 3rem; margin-bottom: .75rem; }
 
-    /* Modal for New Event */
+    /* Modals */
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -163,9 +163,96 @@
       border: 1px solid var(--border);
       border-radius: 16px;
       width: 100%;
-      max-width: 420px;
+      max-width: 440px;
       padding: 1.5rem;
+      max-height: 90vh;
+      overflow-y: auto;
     }
+
+    .modal-box h3 { font-size: 1.1rem; margin-bottom: 0.35rem; }
+    .modal-box .modal-sub { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem; }
+
+    .danger-zone {
+      border: 1px solid rgba(248,81,73,0.35);
+      border-radius: 10px;
+      padding: 0.9rem 1.1rem;
+      margin-top: 0.85rem;
+      background: rgba(248,81,73,0.04);
+    }
+
+    .danger-zone h4 {
+      color: var(--danger, #f85149);
+      font-size: 0.85rem;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Dashboard tabs */
+    .dash-tabs {
+      display: flex;
+      gap: 0.25rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.25rem;
+    }
+
+    .dash-tab {
+      padding: 0.5rem 1.1rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all 0.15s;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      font-family: inherit;
+    }
+
+    .dash-tab:hover { color: var(--text); }
+    .dash-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.85rem 0 0.25rem;
+    }
+
+    .pagination button {
+      padding: 0.3rem 0.7rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-muted);
+      transition: all 0.15s;
+    }
+
+    .pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .pagination button.current { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+    .pagination button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* Audit log status badges */
+    .status-ok     { color: var(--success); }
+    .status-dup    { color: var(--warning); }
+    .status-nf     { color: var(--danger, #f85149); }
+    .status-undo   { color: var(--text-muted); }
+
+    /* Inline alert for modals */
+    .modal-alert {
+      border-radius: 8px;
+      padding: 0.6rem 0.85rem;
+      font-size: 0.82rem;
+      margin-bottom: 0.85rem;
+    }
+    .modal-alert-error   { background: rgba(248,81,73,0.1);  border: 1px solid rgba(248,81,73,0.3); color: #f85149; }
+    .modal-alert-success { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3); color: #3fb950; }
   </style>
 </head>
 <body>
@@ -180,6 +267,7 @@
       <a href="{{ url_for('dashboard') }}" class="active">Dashboard</a>
       <a href="{{ url_for('scan') }}">Scanner</a>
       <a href="{{ url_for('download_apk') }}" class="btn btn-outline btn-sm" style="margin-left:0.5rem;">📱 Download APK</a>
+      <button type="button" class="btn btn-outline btn-sm" style="margin-left:0.25rem;" onclick="openModal('modal-change-pw')" title="Change admin password">🔑</button>
       <form method="POST" action="{{ url_for('logout') }}" style="display:inline;margin-left:0.5rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <button type="submit" class="btn btn-outline btn-sm">Sign Out</button>
@@ -202,20 +290,23 @@
       </div>
     </div>
 
-    <div style="display:flex;align-items:center;gap:0.5rem;">
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
       <form method="POST" action="" id="switch-event-form" style="display:inline;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <select id="event-select" class="form-select" style="padding:0.35rem 0.7rem;font-size:0.82rem;" onchange="switchEvent(this.value)">
           {% for ev in events %}
             <option value="{{ ev['id'] }}" {% if active_event and active_event['id'] == ev['id'] %}selected{% endif %}>
-              {{ ev['name'] }} ({{ ev['code'] }})
+              {{ ev['name'] }} ({{ ev['code'] }}){% if ev['status'] == 'archived' %} [archived]{% endif %}
             </option>
           {% endfor %}
         </select>
       </form>
-      <button type="button" class="btn btn-outline btn-sm" onclick="openNewEventModal()">
-        ➕ New Event
-      </button>
+      <!-- Critical #1 — Edit event button -->
+      <button type="button" class="btn btn-outline btn-sm" onclick="openEditEventModal()" title="Edit event settings">✏️ Edit</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="openNewEventModal()">➕ New</button>
+      <!-- Critical #1 — Archive / Delete event buttons -->
+      <button type="button" class="btn btn-ghost btn-sm" onclick="archiveCurrentEvent()" title="Archive this event (data preserved)">📁 Archive</button>
+      <button type="button" class="btn btn-ghost btn-sm" style="color:var(--danger,#f85149);" onclick="deleteCurrentEvent()" title="Delete event and ALL its data permanently">🗑️ Delete</button>
     </div>
   </div>
 
@@ -291,60 +382,109 @@
     <div class="flex gap-2 flex-wrap items-center">
       <a href="{{ url_for('scan') }}" class="btn btn-success">📷 Open Mobile Scanner</a>
       <form method="POST" action="{{ url_for('generate_qr_zip', event_id=active_event['id'] if active_event else 'default-event') }}" style="display:inline">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <button type="submit" class="btn btn-primary">📦 Download All QRs ZIP</button>
       </form>
     </div>
     <div class="flex gap-2 flex-wrap items-center">
-      <a href="{{ url_for('export_roster', event_id=active_event['id'] if active_event else 'default-event') }}" class="btn btn-outline btn-sm">⬇️ Export CSV</a>
+      <a href="{{ url_for('export_roster', event_id=active_event['id'] if active_event else 'default-event') }}" class="btn btn-outline btn-sm">⬇️ Export Attendance CSV</a>
+      <a href="{{ url_for('api_audit_log_export', event_id=active_event['id'] if active_event else 'default-event') }}" class="btn btn-outline btn-sm">📋 Export Audit Log</a>
       <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">⬆️ Upload Sheet</a>
     </div>
   </div>
 
-  <!-- Search + Table -->
+  <!-- Tabbed Content: Roster | Audit Log -->
   <div class="card" style="padding:1.25rem;">
-    <div style="display:flex;gap:0.6rem;margin-bottom:0.75rem;">
-      <input type="text" id="search" placeholder="Search by name, email, department, ID, scanner device…" autocomplete="off" style="flex:1;" class="form-control" />
-      <button type="button" id="btn-absent-only" class="btn btn-ghost btn-sm" onclick="toggleAbsentOnly()">Absent Only</button>
+    <div class="dash-tabs">
+      <button class="dash-tab active" id="tab-roster-btn" onclick="switchTab('roster')">👥 Roster</button>
+      <button class="dash-tab" id="tab-audit-btn" onclick="switchTab('audit')">📋 Audit Log</button>
     </div>
 
-    <div class="table-wrapper">
-      <table id="roster-table">
-        <thead>
-          <tr id="roster-header-row">
-            <th>ID</th>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Department</th>
-            <th>Status</th>
-            <th>Scanned At</th>
-            <th>Scanner Device</th>
-            <th style="width:50px;text-align:center;">QR</th>
-          </tr>
-        </thead>
-        <tbody id="roster-body">
-          <tr>
-            <td colspan="8" class="text-center text-muted" style="padding:2rem;">Loading participant records…</td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- Roster Tab -->
+    <div id="tab-roster">
+      <div style="display:flex;gap:0.6rem;margin-bottom:0.75rem;">
+        <input type="text" id="search" placeholder="Search by name, email, department, ID, scanner device…" autocomplete="off" style="flex:1;" class="form-control" />
+        <button type="button" id="btn-absent-only" class="btn btn-ghost btn-sm" onclick="toggleAbsentOnly()">Absent Only</button>
+      </div>
+
+      <div class="table-wrapper">
+        <table id="roster-table">
+          <thead>
+            <tr id="roster-header-row">
+              <th>ID</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Department</th>
+              <th>Status</th>
+              <th>Scanned At</th>
+              <th>Scanner Device</th>
+              <th style="width:50px;text-align:center;">QR</th>
+            </tr>
+          </thead>
+          <tbody id="roster-body">
+            <tr>
+              <td colspan="8" class="text-center text-muted" style="padding:2rem;">Loading participant records…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="empty-state" class="empty-state" style="display:none;">
+        <div class="empty-icon">📭</div>
+        <p>No participants found. <a href="{{ url_for('index') }}" style="color:var(--accent)">Upload a sheet</a> to populate this event.</p>
+      </div>
+
+      <!-- Pagination controls (shown only when roster has many rows) -->
+      <div class="pagination" id="roster-pagination" style="display:none;"></div>
     </div>
 
-    <div id="empty-state" class="empty-state" style="display:none;">
-      <div class="empty-icon">📭</div>
-      <p>No participants found. <a href="{{ url_for('index') }}" style="color:var(--accent)">Upload a sheet</a> to populate this event.</p>
+    <!-- Audit Log Tab -->
+    <div id="tab-audit" style="display:none;">
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.85rem;flex-wrap:wrap;align-items:center;">
+        <select id="audit-status-filter" class="form-select" style="font-size:0.82rem;padding:0.35rem 0.6rem;" onchange="loadAuditLog(1)">
+          <option value="">All Statuses</option>
+          <option value="ok">✓ Check-In (ok)</option>
+          <option value="duplicate">⚠ Duplicate</option>
+          <option value="not_found">✗ Not Found</option>
+          <option value="undo">↩ Undo</option>
+        </select>
+        <input type="text" id="audit-device-filter" placeholder="Filter by scanner device…" class="form-control" style="flex:1;min-width:160px;" oninput="clearTimeout(window._adft);window._adft=setTimeout(()=>loadAuditLog(1),400)" />
+        <span id="audit-total-label" style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap;"></span>
+      </div>
+
+      <div class="table-wrapper">
+        <table id="audit-table">
+          <thead>
+            <tr>
+              <th>Reg ID</th>
+              <th>Name</th>
+              <th>Department</th>
+              <th>Scanner Device</th>
+              <th>Status</th>
+              <th>Scanned At</th>
+            </tr>
+          </thead>
+          <tbody id="audit-body">
+            <tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Click the Audit Log tab to load.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination" id="audit-pagination"></div>
     </div>
   </div>
 
 </main>
 
+<!-- =====================================================================
+     MODALS
+     ===================================================================== -->
+
 <!-- New Event Modal -->
 <div class="modal-overlay" id="modal-new-event" style="display:none;">
   <div class="modal-box">
-    <h3 style="font-size:1.15rem;margin-bottom:0.4rem;">➕ Create New Event</h3>
-    <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:1rem;">
-      Create an isolated event with custom ID format and scanner access code.
-    </p>
+    <h3>➕ Create New Event</h3>
+    <p class="modal-sub">Create an isolated event with custom ID format and scanner access code.</p>
     <form method="POST" action="{{ url_for('api_create_event') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div class="form-group" style="margin-bottom:0.75rem;">
@@ -370,19 +510,90 @@
         </div>
       </div>
       <div style="display:flex;gap:0.5rem;">
-        <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeNewEventModal()">Cancel</button>
+        <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeModal('modal-new-event')">Cancel</button>
         <button type="submit" class="btn btn-primary" style="flex:1;">Create Event</button>
       </div>
     </form>
   </div>
 </div>
 
+<!-- Critical #1 — Edit Event Modal -->
+<div class="modal-overlay" id="modal-edit-event" style="display:none;">
+  <div class="modal-box">
+    <h3>✏️ Edit Event</h3>
+    <p class="modal-sub">The event code is immutable. Changing the access code will immediately revoke all scanner tokens.</p>
+    <div id="edit-event-alert" style="display:none;"></div>
+    <div class="form-group" style="margin-bottom:0.75rem;">
+      <label class="form-label">Event Name *</label>
+      <input type="text" id="edit-name" class="form-control" />
+    </div>
+    <div class="form-group" style="margin-bottom:0.75rem;">
+      <label class="form-label">Scanner Access Code *</label>
+      <input type="text" id="edit-access-code" class="form-control" style="font-family:monospace;" />
+      <p style="font-size:0.76rem;color:var(--warning);margin-top:0.3rem;">⚠ Changing this rotates all scanner tokens — volunteers must re-authenticate.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem;">
+      <div class="form-group">
+        <label class="form-label">ID Prefix</label>
+        <input type="text" id="edit-prefix" class="form-control" placeholder="e.g. AAZHI-" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Digit Width</label>
+        <input type="number" id="edit-width" class="form-control" min="1" max="10" />
+      </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;">
+      <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeModal('modal-edit-event')">Cancel</button>
+      <button type="button" class="btn btn-primary" style="flex:1;" id="btn-save-event" onclick="saveEditEvent()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Critical #2 — Change Admin Password Modal -->
+<div class="modal-overlay" id="modal-change-pw" style="display:none;">
+  <div class="modal-box">
+    <h3>🔑 Change Admin Password</h3>
+    <p class="modal-sub">The new password is stored in the database and survives server restarts. Must be at least 8 characters.</p>
+    <div id="pw-alert" style="display:none;"></div>
+    <div class="form-group" style="margin-bottom:0.75rem;">
+      <label class="form-label">Current Password *</label>
+      <input type="password" id="pw-current" class="form-control" autocomplete="current-password" />
+    </div>
+    <div class="form-group" style="margin-bottom:0.75rem;">
+      <label class="form-label">New Password *</label>
+      <input type="password" id="pw-new" class="form-control" autocomplete="new-password" />
+    </div>
+    <div class="form-group" style="margin-bottom:1rem;">
+      <label class="form-label">Confirm New Password *</label>
+      <input type="password" id="pw-confirm" class="form-control" autocomplete="new-password" />
+    </div>
+    <div style="display:flex;gap:0.5rem;">
+      <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeModal('modal-change-pw')">Cancel</button>
+      <button type="button" class="btn btn-primary" style="flex:1;" id="btn-change-pw" onclick="changePassword()">Update Password</button>
+    </div>
+  </div>
+</div>
+
 <script>
   const currentEventId = "{{ active_event['id'] if active_event else 'default-event' }}";
+  const CSRF_TOKEN = "{{ csrf_token() }}";
   let allRows = [];
   let extraHeaders = [];
   let searchTerm = '';
   let showAbsentOnly = false;
+  let rosterCurrentPage = 1;
+  const ROSTER_PAGE_SIZE = 200;  // load in pages of 200; UI search filters client-side
+  let rosterTotalPages = 1;
+  let auditCurrentPage = 1;
+  let auditTotalPages = 1;
+  let activeTab = 'roster';
+
+  // ---- Utilities -------------------------------------------------------
+  function escHtml(s) {
+    return String(s || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
 
   function formatTime(iso) {
     if (!iso) return '—';
@@ -392,20 +603,155 @@
     } catch { return iso; }
   }
 
-  function openNewEventModal() {
-    document.getElementById('modal-new-event').style.display = 'flex';
+  // ---- Modal helpers ---------------------------------------------------
+  function openModal(id) {
+    document.getElementById(id).style.display = 'flex';
   }
 
-  function closeNewEventModal() {
-    document.getElementById('modal-new-event').style.display = 'none';
+  function closeModal(id) {
+    document.getElementById(id).style.display = 'none';
   }
 
+  function openNewEventModal() { openModal('modal-new-event'); }
+  function closeNewEventModal() { closeModal('modal-new-event'); }
+
+  function setAlert(alertId, msg, type) {
+    const el = document.getElementById(alertId);
+    if (!msg) { el.style.display = 'none'; return; }
+    el.className = `modal-alert modal-alert-${type}`;
+    el.textContent = msg;
+    el.style.display = '';
+  }
+
+  // ---- Tab switcher ----------------------------------------------------
+  function switchTab(tab) {
+    activeTab = tab;
+    document.getElementById('tab-roster').style.display = tab === 'roster' ? '' : 'none';
+    document.getElementById('tab-audit').style.display = tab === 'audit' ? '' : 'none';
+    document.getElementById('tab-roster-btn').classList.toggle('active', tab === 'roster');
+    document.getElementById('tab-audit-btn').classList.toggle('active', tab === 'audit');
+    if (tab === 'audit') loadAuditLog(1);
+  }
+
+  // ---- Event switcher --------------------------------------------------
   function switchEvent(eventId) {
     if (!eventId) return;
-    fetch(`/api/events/${eventId}/select`, { method: 'POST' })
-      .then(() => window.location.reload());
+    fetch(`/api/events/${eventId}/select`, {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': CSRF_TOKEN }
+    }).then(() => window.location.reload());
   }
 
+  // ---- Critical #1 — Archive event ------------------------------------
+  async function archiveCurrentEvent() {
+    const label = document.getElementById('event-select').selectedOptions[0]?.text || 'this event';
+    const isCurrentlyArchived = label.includes('[archived]');
+    const action = isCurrentlyArchived ? 'restore' : 'archive';
+    if (!confirm(`${action === 'archive' ? 'Archive' : 'Restore'} "${label.replace(' [archived]','')}"?\n\n${action === 'archive' ? 'Archived events are hidden from scanners but data is preserved.' : 'Restoring will make the event active again.'}`)) return;
+    try {
+      const res = await fetch(`/api/events/${currentEventId}/archive`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': CSRF_TOKEN }
+      });
+      const data = await res.json();
+      if (res.ok) window.location.reload();
+      else alert(data.message || 'Failed to archive event.');
+    } catch(e) { alert('Request failed: ' + e.message); }
+  }
+
+  // ---- Critical #1 — Delete event -------------------------------------
+  async function deleteCurrentEvent() {
+    const label = document.getElementById('event-select').selectedOptions[0]?.text || 'this event';
+    const confirm1 = confirm(`⚠️ PERMANENTLY DELETE "${label}"?\n\nThis will delete ALL participants, attendance records, scanner tokens, and audit logs for this event.\n\nThis CANNOT be undone. Continue?`);
+    if (!confirm1) return;
+    const confirm2 = confirm(`Last chance — are you absolutely sure you want to delete "${label}" and ALL its data forever?`);
+    if (!confirm2) return;
+    try {
+      const res = await fetch(`/api/events/${currentEventId}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
+      });
+      const data = await res.json();
+      if (res.ok) window.location.href = '/dashboard';
+      else alert(data.message || 'Failed to delete event.');
+    } catch(e) { alert('Request failed: ' + e.message); }
+  }
+
+  // ---- High #6 — Edit event -------------------------------------------
+  function openEditEventModal() {
+    // Pre-fill current event values
+    const pills = document.querySelectorAll('.pill strong');
+    document.getElementById('edit-name').value = "{{ (active_event['name'] if active_event else '') | e }}";
+    document.getElementById('edit-access-code').value = "{{ (active_event['access_code'] if active_event else '') | e }}";
+    document.getElementById('edit-prefix').value = "{{ (active_event['id_prefix'] if active_event else '') | e }}";
+    document.getElementById('edit-width').value = "{{ active_event['id_width'] if active_event else 3 }}";
+    setAlert('edit-event-alert', '', 'error');
+    openModal('modal-edit-event');
+  }
+
+  async function saveEditEvent() {
+    const btn = document.getElementById('btn-save-event');
+    const name = document.getElementById('edit-name').value.trim();
+    const access_code = document.getElementById('edit-access-code').value.trim();
+    const id_prefix = document.getElementById('edit-prefix').value.trim();
+    const id_width = parseInt(document.getElementById('edit-width').value) || 3;
+    if (!name || !access_code) { setAlert('edit-event-alert', 'Name and access code are required.', 'error'); return; }
+
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const res = await fetch(`/api/events/${currentEventId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+        body: JSON.stringify({ name, access_code, id_prefix, id_width })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const msg = data.tokens_invalidated
+          ? 'Event updated. All scanner tokens were revoked — volunteers must re-authenticate.'
+          : 'Event updated successfully.';
+        setAlert('edit-event-alert', msg, 'success');
+        setTimeout(() => { closeModal('modal-edit-event'); window.location.reload(); }, 1800);
+      } else {
+        setAlert('edit-event-alert', data.message || 'Failed to update event.', 'error');
+      }
+    } catch(e) { setAlert('edit-event-alert', 'Request failed: ' + e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Save Changes'; }
+  }
+
+  // ---- Critical #2 — Change admin password ----------------------------
+  async function changePassword() {
+    const btn = document.getElementById('btn-change-pw');
+    const current_password = document.getElementById('pw-current').value;
+    const new_password = document.getElementById('pw-new').value;
+    const confirm_pw = document.getElementById('pw-confirm').value;
+
+    if (!current_password || !new_password || !confirm_pw) { setAlert('pw-alert', 'All fields are required.', 'error'); return; }
+    if (new_password !== confirm_pw) { setAlert('pw-alert', 'New passwords do not match.', 'error'); return; }
+    if (new_password.length < 8) { setAlert('pw-alert', 'New password must be at least 8 characters.', 'error'); return; }
+
+    btn.disabled = true; btn.textContent = 'Updating…';
+    try {
+      const res = await fetch('/api/admin/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+        body: JSON.stringify({ current_password, new_password })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAlert('pw-alert', '✓ Password updated successfully.', 'success');
+        document.getElementById('pw-current').value = '';
+        document.getElementById('pw-new').value = '';
+        document.getElementById('pw-confirm').value = '';
+        setTimeout(() => closeModal('modal-change-pw'), 2000);
+      } else {
+        setAlert('pw-alert', data.message || 'Failed to update password.', 'error');
+      }
+    } catch(e) { setAlert('pw-alert', 'Request failed: ' + e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Update Password'; }
+  }
+
+  // ---- Roster helpers --------------------------------------------------
   function toggleAbsentOnly() {
     showAbsentOnly = !showAbsentOnly;
     const btn = document.getElementById('btn-absent-only');
@@ -432,7 +778,6 @@
   function renderTable(rows) {
     const tbody = document.getElementById('roster-body');
     const empty = document.getElementById('empty-state');
-    const totalCols = 7 + extraHeaders.length;
 
     if (!rows.length) {
       tbody.innerHTML = '';
@@ -456,16 +801,59 @@
         <td style="color:var(--text-muted);font-size:.82rem">${formatTime(r.scanned_at)}</td>
         <td style="color:var(--text-dim);font-size:.78rem;font-family:monospace;">${escHtml(r.scanned_by_device_name || '—')}</td>
         <td style="text-align:center;white-space:nowrap;">
-          <a href="/api/events/${encodeURIComponent(currentEventId)}/qr/${encodeURIComponent(r.reg_id)}" class="btn btn-outline btn-sm" title="Download QR Pass for ${escHtml(r.reg_id)}" style="padding:.2rem .5rem;text-decoration:none;font-size:0.75rem;">⬇️</a>
-          ${r.attended ? `<button type="button" class="btn btn-outline btn-sm js-undo" data-reg="${escHtml(r.reg_id)}" data-name="${escHtml(r.name)}" title="Undo check-in for ${escHtml(r.name)}" style="padding:.2rem .5rem;font-size:0.75rem;">↩️</button>` : ''}
+          <a href="/api/events/${encodeURIComponent(currentEventId)}/qr/${encodeURIComponent(r.reg_id)}" class="btn btn-outline btn-sm" title="Download QR for ${escHtml(r.reg_id)}" style="padding:.2rem .5rem;text-decoration:none;font-size:0.75rem;">⬇️</a>
+          ${r.attended ? `<button type="button" class="btn btn-outline btn-sm js-undo" data-reg="${escHtml(r.reg_id)}" data-name="${escHtml(r.name)}" title="Undo check-in" style="padding:.2rem .5rem;font-size:0.75rem;">↩️</button>` : ''}
         </td>
       </tr>
     `).join('');
   }
 
-  // ---- Attendance correction & device revocation -------------------------
-  const CSRF_TOKEN = "{{ csrf_token() }}";
+  // High #4 — Roster pagination
+  function renderRosterPagination(page, totalPages) {
+    const container = document.getElementById('roster-pagination');
+    if (totalPages <= 1) { container.style.display = 'none'; return; }
+    container.style.display = 'flex';
+    const pages = [];
+    pages.push(`<button ${page===1?'disabled':''} onclick="loadRosterPage(${page-1})">‹ Prev</button>`);
+    const range = Array.from({length: totalPages}, (_,i) => i+1);
+    for (const p of range) {
+      if (p === 1 || p === totalPages || Math.abs(p - page) <= 2) {
+        pages.push(`<button class="${p===page?'current':''}" onclick="loadRosterPage(${p})">${p}</button>`);
+      } else if (Math.abs(p - page) === 3) {
+        pages.push(`<button disabled>…</button>`);
+      }
+    }
+    pages.push(`<button ${page===totalPages?'disabled':''} onclick="loadRosterPage(${page+1})">Next ›</button>`);
+    container.innerHTML = pages.join('');
+  }
 
+  function applyFilter() {
+    const q = searchTerm.toLowerCase();
+    let filtered = allRows;
+
+    if (showAbsentOnly) {
+      filtered = filtered.filter(r => !r.attended);
+    }
+
+    if (q) {
+      filtered = filtered.filter(r => {
+        const basicMatch = (r.reg_id && r.reg_id.toLowerCase().includes(q)) ||
+                           (r.name && r.name.toLowerCase().includes(q)) ||
+                           (r.email && r.email.toLowerCase().includes(q)) ||
+                           (r.department && r.department.toLowerCase().includes(q)) ||
+                           (r.scanned_by_device_name && r.scanned_by_device_name.toLowerCase().includes(q));
+        if (basicMatch) return true;
+        if (r.extra) {
+          return Object.values(r.extra).some(v => String(v).toLowerCase().includes(q));
+        }
+        return false;
+      });
+    }
+
+    renderTable(filtered);
+  }
+
+  // ---- Attendance correction & device revocation ----------------------
   async function postAdmin(url) {
     const res = await fetch(url, {
       method: 'POST',
@@ -498,7 +886,7 @@
     if (revokeLink) {
       e.preventDefault();
       const device = revokeLink.dataset.device;
-      if (!confirm(`Revoke access for "${revokeLink.dataset.name}"?\n\nThat phone must re-enter the access code to scan again.`)) return;
+      if (!confirm(`Revoke access for "${revokeLink.dataset.name}"?\n\nThat phone is blocked from re-joining this event even if they know the access code.`)) return;
       try {
         await postAdmin(`/api/events/${encodeURIComponent(currentEventId)}/scanners/${encodeURIComponent(device)}/revoke`);
       } catch (err) {
@@ -507,38 +895,95 @@
     }
   });
 
-  function escHtml(s) {
-    return String(s || '')
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // ---- High #4 — Load roster page -------------------------------------
+  async function loadRosterPage(page) {
+    rosterCurrentPage = page;
+    try {
+      const url = `/api/events/${currentEventId}/roster?page=${page}&per_page=${ROSTER_PAGE_SIZE}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const newExtraHeaders = data.extra_headers || [];
+      if (JSON.stringify(newExtraHeaders) !== JSON.stringify(extraHeaders)) {
+        extraHeaders = newExtraHeaders;
+        buildHeaderRow();
+      }
+      allRows = data.roster || [];
+      rosterTotalPages = data.total_pages || 1;
+      applyFilter();
+      renderRosterPagination(page, rosterTotalPages);
+    } catch(e) { console.error('Roster page fetch error:', e); }
   }
 
-  function applyFilter() {
-    const q = searchTerm.toLowerCase();
-    let filtered = allRows;
+  // ---- High #5 — Audit Log --------------------------------------------
+  async function loadAuditLog(page) {
+    auditCurrentPage = page;
+    const status = document.getElementById('audit-status-filter').value;
+    const device = document.getElementById('audit-device-filter').value.trim();
+    let url = `/api/events/${currentEventId}/audit-log?page=${page}&per_page=50`;
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (device) url += `&device=${encodeURIComponent(device)}`;
 
-    if (showAbsentOnly) {
-      filtered = filtered.filter(r => !r.attended);
-    }
+    document.getElementById('audit-body').innerHTML =
+      '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Loading…</td></tr>';
 
-    if (q) {
-      filtered = filtered.filter(r => {
-        const basicMatch = (r.reg_id && r.reg_id.toLowerCase().includes(q)) ||
-                           (r.name && r.name.toLowerCase().includes(q)) ||
-                           (r.email && r.email.toLowerCase().includes(q)) ||
-                           (r.department && r.department.toLowerCase().includes(q)) ||
-                           (r.scanned_by_device_name && r.scanned_by_device_name.toLowerCase().includes(q));
-        if (basicMatch) return true;
-        if (r.extra) {
-          return Object.values(r.extra).some(v => String(v).toLowerCase().includes(q));
-        }
-        return false;
-      });
-    }
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      auditTotalPages = data.total_pages || 1;
+      document.getElementById('audit-total-label').textContent = `${data.total.toLocaleString()} total records`;
 
-    renderTable(filtered);
+      const statusClass = { ok:'status-ok', duplicate:'status-dup', not_found:'status-nf', undo:'status-undo' };
+      const statusLabel = { ok:'✓ Check-In', duplicate:'⚠ Duplicate', not_found:'✗ Not Found', undo:'↩ Undo' };
+
+      if (!data.logs.length) {
+        document.getElementById('audit-body').innerHTML =
+          '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">No records found.</td></tr>';
+        document.getElementById('audit-pagination').innerHTML = '';
+        return;
+      }
+
+      document.getElementById('audit-body').innerHTML = data.logs.map(l => `
+        <tr>
+          <td><code style="color:var(--accent);font-size:.82rem;">${escHtml(l.reg_id)}</code></td>
+          <td>${escHtml(l.name)}</td>
+          <td style="color:var(--text-muted);font-size:.82rem">${escHtml(l.department)}</td>
+          <td style="font-family:monospace;font-size:.78rem;color:var(--text-dim)">${escHtml(l.device_name)}</td>
+          <td><span class="${statusClass[l.status] || ''}" style="font-weight:600;font-size:.82rem">${statusLabel[l.status] || l.status}</span></td>
+          <td style="color:var(--text-muted);font-size:.82rem">${formatTime(l.scanned_at)}</td>
+        </tr>
+      `).join('');
+
+      // Audit pagination
+      renderAuditPagination(page, auditTotalPages);
+
+    } catch(e) { console.error('Audit log fetch error:', e); }
   }
 
+  function renderAuditPagination(page, totalPages) {
+    const container = document.getElementById('audit-pagination');
+    if (totalPages <= 1) { container.innerHTML = ''; return; }
+    const pages = [];
+    pages.push(`<button ${page===1?'disabled':''} onclick="loadAuditLog(${page-1})">‹ Prev</button>`);
+    const range = Array.from({length: Math.min(totalPages, 7)}, (_,i) => {
+      if (totalPages <= 7) return i+1;
+      if (page <= 4) return i+1;
+      if (page >= totalPages - 3) return totalPages - 6 + i;
+      return page - 3 + i;
+    });
+    for (const p of range) {
+      pages.push(`<button class="${p===page?'current':''}" onclick="loadAuditLog(${p})">${p}</button>`);
+    }
+    if (totalPages > 7 && range[range.length-1] < totalPages) {
+      pages.push(`<button disabled>…</button>`);
+      pages.push(`<button onclick="loadAuditLog(${totalPages})">${totalPages}</button>`);
+    }
+    pages.push(`<button ${page===totalPages?'disabled':''} onclick="loadAuditLog(${page+1})">Next ›</button>`);
+    container.innerHTML = pages.join('');
+  }
+
+  // ---- Stats polling ---------------------------------------------------
   async function fetchStatsAndRoster() {
     try {
       // 1. Fetch Stats & Scanners
@@ -575,17 +1020,9 @@
         }
       }
 
-      // 2. Fetch Full Roster
-      const rosterRes = await fetch(`/api/events/${currentEventId}/roster`);
-      if (rosterRes.ok) {
-        const rosterData = await rosterRes.json();
-        const newExtraHeaders = rosterData.extra_headers || [];
-        if (JSON.stringify(newExtraHeaders) !== JSON.stringify(extraHeaders)) {
-          extraHeaders = newExtraHeaders;
-          buildHeaderRow();
-        }
-        allRows = rosterData.roster || [];
-        applyFilter();
+      // 2. Fetch Full Roster (High #4 — paginated fetch)
+      if (activeTab === 'roster') {
+        await loadRosterPage(rosterCurrentPage);
       }
 
     } catch (e) {
@@ -596,6 +1033,18 @@
   document.getElementById('search').addEventListener('input', function() {
     searchTerm = this.value;
     applyFilter();
+  });
+
+  // Close modals on overlay click
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', function(e) {
+      if (e.target === this) {
+        this.style.display = 'none';
+        // Clear pw fields on close
+        const pwCurrent = document.getElementById('pw-current');
+        if (pwCurrent) { pwCurrent.value = ''; document.getElementById('pw-new').value = ''; document.getElementById('pw-confirm').value = ''; }
+      }
+    });
   });
 
   fetchStatsAndRoster();

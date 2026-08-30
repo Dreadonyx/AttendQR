@@ -225,6 +225,32 @@ def init_db():
             )
         """)
 
+        # 6. Upload Sessions Table — persists roster-upload wizard state
+        #    so a stale/expired session cookie does not force a re-upload.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS upload_sessions (
+                id VARCHAR(64) PRIMARY KEY,
+                headers_json TEXT NOT NULL,
+                row_count INTEGER NOT NULL DEFAULT 0,
+                file_ext VARCHAR(8) NOT NULL DEFAULT 'xlsx',
+                target_event_id VARCHAR(64),
+                created_at VARCHAR(32) NOT NULL
+            )
+        """)
+
+        # 7. Blocked Devices Table — records revoked device IDs per event
+        #    so revoked phones cannot immediately re-authenticate with the
+        #    same device_id even if they still know the access code.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS blocked_devices (
+                id VARCHAR(64) PRIMARY KEY,
+                event_id VARCHAR(64) NOT NULL,
+                device_id VARCHAR(64) NOT NULL,
+                blocked_at VARCHAR(32) NOT NULL,
+                CONSTRAINT uq_blocked_event_device UNIQUE (event_id, device_id)
+            )
+        """)
+
         db.commit()
 
         # Create indexes
@@ -232,6 +258,8 @@ def init_db():
             db.execute("CREATE INDEX IF NOT EXISTS idx_part_event_reg ON participants(event_id, reg_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_scanners_event ON scanners(event_id)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_logs_event_scan ON attendance_logs(event_id, scan_id)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_logs_event_time ON attendance_logs(event_id, scanned_at)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_blocked_event_device ON blocked_devices(event_id, device_id)")
             db.commit()
         except Exception:
             db.rollback()

@@ -96,6 +96,21 @@ try:
 except Exception as _init_err:
     print(f"Warning during startup db.init_db(): {_init_err}")
 
+# Admin password — may be updated at runtime via /api/admin/change-password
+# and persisted in the settings table so it survives restarts.
+_admin_pw_from_db: Optional[str] = None
+try:
+    _pw_db = db.get_db_connection()
+    _pw_row = _pw_db.fetchone("SELECT value FROM settings WHERE key = 'admin_password'")
+    if _pw_row and _pw_row.get("value"):
+        _admin_pw_from_db = _pw_row["value"]
+    _pw_db.close()
+except Exception:
+    pass
+
+if _admin_pw_from_db:
+    ADMIN_PASSWORD = _admin_pw_from_db
+
 
 @app.after_request
 def add_cors_and_security_headers(response):
@@ -638,6 +653,172 @@ def api_select_event(event_id):
 
 
 # ---------------------------------------------------------------------------
+# Critical #1 — Event Archive, Delete & Edit
+# ---------------------------------------------------------------------------
+
+@app.route("/api/events/<event_id>/archive", methods=["POST"])
+@require_admin
+def api_archive_event(event_id):
+    """
+    Toggle the event between active and archived status.
+    Archived events remain in the database (audit trail preserved) but
+    they no longer appear in the scanner's event list and scanners cannot
+    authenticate against them.
+    """
+    database = get_db()
+    ev = database.fetchone("SELECT id, name, status FROM events WHERE id = ?", (event_id,))
+    if not ev:
+        return jsonify({"status": "error", "message": "Event not found"}), 404
+
+    new_status = "archived" if ev["status"] == "active" else "active"
+    database.execute("UPDATE events SET status = ? WHERE id = ?", (new_status, event_id))
+    database.commit()
+
+    # Clear session active event if we just archived it
+    if new_status == "archived" and session.get("active_event_id") == event_id:
+        session.pop("active_event_id", None)
+
+    if request.is_json:
+        return jsonify({"status": "ok", "event_id": event_id, "new_status": new_status})
+    flash(f"Event '{ev['name']}' is now {new_status}.", "success")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/api/events/<event_id>", methods=["DELETE"])
+@require_admin
+def api_delete_event(event_id):
+    """
+    Permanently delete an event and ALL its data: participants, scanners,
+    blocked devices, and attendance logs. This cannot be undone.
+    The caller must send { "confirm": true } in the JSON body.
+    """
+    payload = request.get_json(silent=True) or {}
+    if not payload.get("confirm"):
+        return jsonify({
+            "status": "error",
+            "message": "Send { \"confirm\": true } to permanently delete this event and all its data.",
+        }), 400
+
+    database = get_db()
+    ev = database.fetchone("SELECT id, name FROM events WHERE id = ?", (event_id,))
+    if not ev:
+        return jsonify({"status": "error", "message": "Event not found"}), 404
+
+    # Cascade delete — order matters for FK-enforcing engines
+    database.execute("DELETE FROM attendance_logs WHERE event_id = ?", (event_id,))
+    database.execute("DELETE FROM blocked_devices WHERE event_id = ?", (event_id,))
+    database.execute("DELETE FROM scanners WHERE event_id = ?", (event_id,))
+    database.execute("DELETE FROM participants WHERE event_id = ?", (event_id,))
+    database.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    database.commit()
+
+    if session.get("active_event_id") == event_id:
+        session.pop("active_event_id", None)
+
+    return jsonify({"status": "ok", "deleted_event": ev["name"]}), 200
+
+
+@app.route("/api/events/<event_id>", methods=["PATCH"])
+@require_admin
+def api_update_event(event_id):
+    """
+    High #6 — Edit event metadata (name, access code, ID prefix/width).
+    The event code is deliberately immutable after creation because scanners
+    cache it and QR codes encode it indirectly via the reg_id.
+    Changing the access code immediately invalidates all existing scanner
+    tokens because they must re-authenticate.
+    """
+    payload = request.get_json(silent=True) or {}
+    database = get_db()
+    ev = database.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+    if not ev:
+        return jsonify({"status": "error", "message": "Event not found"}), 404
+
+    name = str(payload.get("name", ev["name"])).strip() or ev["name"]
+    access_code = str(payload.get("access_code", ev["access_code"])).strip() or ev["access_code"]
+    id_prefix = str(payload.get("id_prefix", ev["id_prefix"] or "")).strip()
+    id_width = safe_int(payload.get("id_width", ev["id_width"] or 3), default=3, low=1, high=12)
+
+    if len(name) > 255:
+        return jsonify({"status": "error", "message": "Event name too long (max 255)"}), 400
+    if len(access_code) < 4:
+        return jsonify({"status": "error", "message": "Access code must be at least 4 characters"}), 400
+
+    access_code_changed = not secrets.compare_digest(str(ev["access_code"]), access_code)
+
+    database.execute("""
+        UPDATE events SET name = ?, access_code = ?, id_prefix = ?, id_width = ? WHERE id = ?
+    """, (name, access_code, id_prefix, id_width, event_id))
+
+    # If access code changed, delete all scanner tokens so devices must re-auth.
+    if access_code_changed:
+        database.execute(
+            "UPDATE scanners SET token = ?, status = 'revoked' WHERE event_id = ?",
+            (f"revoked-ac-{uuid.uuid4()}", event_id),
+        )
+
+    database.commit()
+
+    return jsonify({
+        "status": "ok",
+        "event_id": event_id,
+        "name": name,
+        "tokens_invalidated": access_code_changed,
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Critical #2 — Admin Password Change
+# ---------------------------------------------------------------------------
+
+@app.route("/api/admin/change-password", methods=["POST"])
+@require_admin
+def api_change_password():
+    """
+    Change the admin console password at runtime. The new password is
+    written to the `settings` table so it survives server restarts.
+    Changing the password does NOT invalidate existing admin sessions
+    (so the requester's own session stays valid), but all other admin
+    sessions will be effectively logged out on next request because the
+    password they authenticated with is no longer accepted.
+    """
+    global ADMIN_PASSWORD
+    payload = request.get_json(silent=True) or {}
+    current_pw = str(payload.get("current_password", ""))
+    new_pw = str(payload.get("new_password", "")).strip()
+
+    bucket = f"chpw:{request.remote_addr}"
+    if rate_limited(bucket):
+        return jsonify({"status": "error", "message": "Too many attempts. Wait a few minutes."}), 429
+
+    if not secrets.compare_digest(current_pw, ADMIN_PASSWORD):
+        record_auth_failure(bucket)
+        return jsonify({"status": "error", "message": "Current password is incorrect."}), 401
+
+    if len(new_pw) < 8:
+        return jsonify({"status": "error", "message": "New password must be at least 8 characters."}), 400
+
+    if secrets.compare_digest(new_pw, ADMIN_PASSWORD):
+        return jsonify({"status": "error", "message": "New password must differ from the current one."}), 400
+
+    clear_auth_failures(bucket)
+
+    # Persist to DB so restarts retain the new password
+    database = get_db()
+    database.execute("""
+        INSERT INTO settings (key, value) VALUES ('admin_password', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    """, (new_pw,))
+    database.commit()
+
+    # Update in-memory value immediately for this process
+    ADMIN_PASSWORD = new_pw
+
+    return jsonify({"status": "ok", "message": "Password updated successfully."}), 200
+
+
+
+# ---------------------------------------------------------------------------
 # Scanning, Sync & Heartbeat APIs
 # ---------------------------------------------------------------------------
 
@@ -979,13 +1160,127 @@ def api_event_stats(event_id):
 
 
 # ---------------------------------------------------------------------------
+# High #5 — Audit Log Viewer + Export
+# ---------------------------------------------------------------------------
+
+@app.route("/api/events/<event_id>/audit-log", methods=["GET"])
+@require_admin
+def api_audit_log(event_id):
+    """Paginated full audit log for an event. Includes all scan attempts."""
+    database = get_db()
+    ev = database.fetchone("SELECT id FROM events WHERE id = ?", (event_id,))
+    if not ev:
+        return jsonify({"status": "error", "message": "Event not found"}), 404
+
+    page = safe_int(request.args.get("page", 1), default=1, low=1)
+    per_page = safe_int(request.args.get("per_page", 50), default=50, low=10, high=200)
+    status_filter = request.args.get("status", "").strip().lower()
+    device_filter = request.args.get("device", "").strip()
+    offset = (page - 1) * per_page
+
+    count_sql = "SELECT COUNT(*) as cnt FROM attendance_logs WHERE event_id = ?"
+    log_sql = """
+        SELECT al.id, al.reg_id, al.device_name, al.status,
+               al.scanned_at, al.synced_at, al.scan_id,
+               p.name, p.department
+        FROM attendance_logs al
+        LEFT JOIN participants p ON al.participant_id = p.id
+        WHERE al.event_id = ?
+    """
+    params: List = [event_id]
+
+    if status_filter in ("ok", "duplicate", "not_found", "undo"):
+        count_sql += " AND status = ?"
+        log_sql += " AND al.status = ?"
+        params.append(status_filter)
+
+    if device_filter:
+        count_sql += " AND device_name = ?"
+        log_sql += " AND al.device_name = ?"
+        params.append(device_filter)
+
+    total_row = database.fetchone(count_sql, params)
+    total = total_row["cnt"] if total_row else 0
+
+    log_sql += " ORDER BY al.scanned_at DESC LIMIT ? OFFSET ?"
+    rows = database.fetchall(log_sql, params + [per_page, offset])
+
+    return jsonify({
+        "status": "ok",
+        "event_id": event_id,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": max(1, math.ceil(total / per_page)),
+        "logs": [
+            {
+                "reg_id": r["reg_id"],
+                "name": r["name"] or "(unregistered)",
+                "department": r["department"] or "",
+                "device_name": r["device_name"],
+                "status": r["status"],
+                "scanned_at": r["scanned_at"],
+                "synced_at": r["synced_at"],
+            }
+            for r in rows
+        ],
+    }), 200
+
+
+@app.route("/api/events/<event_id>/audit-log/export", methods=["GET"])
+@require_admin
+def api_audit_log_export(event_id):
+    """Export full audit log as CSV — every scan attempt ever made on this event."""
+    database = get_db()
+    event = database.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
+    if not event:
+        return "Event not found", 404
+
+    rows = database.fetchall("""
+        SELECT al.reg_id, p.name, p.email, p.department,
+               al.device_name, al.status, al.scanned_at, al.synced_at, al.scan_id
+        FROM attendance_logs al
+        LEFT JOIN participants p ON al.participant_id = p.id
+        WHERE al.event_id = ?
+        ORDER BY al.scanned_at ASC
+    """, (event_id,))
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Registration ID", "Name", "Email", "Department",
+                     "Scanner Device", "Status", "Scanned At", "Synced At", "Scan ID"])
+    for r in rows:
+        writer.writerow([
+            sanitize_csv_cell(r["reg_id"]),
+            sanitize_csv_cell(r["name"] or ""),
+            sanitize_csv_cell(r["email"] or ""),
+            sanitize_csv_cell(r["department"] or ""),
+            sanitize_csv_cell(r["device_name"]),
+            r["status"],
+            r["scanned_at"] or "",
+            r["synced_at"] or "",
+            r["scan_id"] or "",
+        ])
+
+    buf.seek(0)
+    event_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", event["code"])
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return send_file(
+        io.BytesIO(buf.read().encode("utf-8")),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=f"{event_slug}_audit_log_{timestamp}.csv",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Roster, Late Adds, QR & Export APIs
 # ---------------------------------------------------------------------------
 
 @app.route("/api/events/<event_id>/roster", methods=["GET"])
 @app.route("/api/roster", methods=["GET"])
 def api_event_roster(event_id=None):
-    """Return full roster with extra fields for the event."""
+    """Return roster for the event. High #4: supports ?page= and ?per_page= for large rosters."""
     if not event_id:
         if not is_admin():
             return jsonify({"status": "unauthorized", "message": "Admin authentication required"}), 401
@@ -1001,19 +1296,39 @@ def api_event_roster(event_id=None):
     if not event:
         return jsonify({"summary": {"total": 0, "attended": 0, "percentage": 0}, "roster": [], "extra_headers": []})
 
-    rows = database.fetchall(
-        "SELECT reg_id, name, email, department, attended, scanned_at, scanned_by_device_name, extra_json FROM participants WHERE event_id = ? ORDER BY reg_id",
-        (event_id,)
+    # Pagination parameters (no pagination = full roster for backwards-compat)
+    page = safe_int(request.args.get("page", 0), default=0, low=0)
+    per_page = safe_int(request.args.get("per_page", 0), default=0, low=1, high=500)
+    paginated = page > 0 and per_page > 0
+
+    # Always compute total summary from the full set
+    summary_row = database.fetchone(
+        "SELECT COUNT(*) as total, SUM(attended) as attended FROM participants WHERE event_id = ?",
+        (event_id,),
     )
-    total = len(rows)
-    attended = sum(1 for r in rows if r["attended"])
+    total = summary_row["total"] if summary_row and summary_row["total"] else 0
+    attended = summary_row["attended"] if summary_row and summary_row["attended"] else 0
     pct = round(attended / total * 100, 1) if total > 0 else 0.0
 
-    extra_headers = []
+    extra_headers: List = []
     try:
         extra_headers = json.loads(event["extra_headers_json"] or "[]")
     except Exception:
         pass
+
+    if paginated:
+        offset = (page - 1) * per_page
+        rows = database.fetchall(
+            "SELECT reg_id, name, email, department, attended, scanned_at, scanned_by_device_name, extra_json"
+            " FROM participants WHERE event_id = ? ORDER BY reg_id LIMIT ? OFFSET ?",
+            (event_id, per_page, offset),
+        )
+    else:
+        rows = database.fetchall(
+            "SELECT reg_id, name, email, department, attended, scanned_at, scanned_by_device_name, extra_json"
+            " FROM participants WHERE event_id = ? ORDER BY reg_id",
+            (event_id,),
+        )
 
     roster_list = []
     for r in rows:
@@ -1025,14 +1340,21 @@ def api_event_roster(event_id=None):
             d["extra"] = {}
         roster_list.append(d)
 
-    return jsonify({
+    response: Dict[str, Any] = {
         "event_id": event_id,
         "event_name": event["name"],
         "event_code": event["code"],
         "summary": {"total": total, "attended": attended, "percentage": pct},
         "extra_headers": extra_headers,
         "roster": roster_list,
-    })
+    }
+    if paginated:
+        response["page"] = page
+        response["per_page"] = per_page
+        response["total_pages"] = max(1, math.ceil(total / per_page))
+
+    return jsonify(response)
+
 
 
 @app.route("/api/events/<event_id>/add-participant", methods=["POST"])
@@ -1279,7 +1601,7 @@ def index():
 @app.route("/upload", methods=["POST"])
 @require_admin
 def upload():
-    """Receive file, parse headers & rows, store in session, redirect to mapping."""
+    """Receive file, parse headers & rows, store in session AND DB, redirect to mapping."""
     file = request.files.get("sheet")
     if not file or file.filename == "":
         flash("No file selected.", "error")
@@ -1332,6 +1654,19 @@ def upload():
     session["headers"] = headers
     session["row_count"] = len(rows)
 
+    # Critical #3 — Persist upload state to DB so the mapping page can recover
+    # if the session cookie expires before the admin confirms the mapping.
+    try:
+        _udb = get_db()
+        _udb.execute("""
+            INSERT INTO upload_sessions (id, headers_json, row_count, file_ext, target_event_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET headers_json=excluded.headers_json
+        """, (tmp_id, json.dumps(headers), len(rows), ext, target_event_id, now_utc_iso()))
+        _udb.commit()
+    except Exception:
+        pass  # Non-fatal; session still has the state
+
     return redirect(url_for("mapping"))
 
 
@@ -1339,12 +1674,33 @@ def upload():
 @require_admin
 def mapping():
     """Column-mapping step — maps columns and populates participants for the event."""
+    database = get_db()
+
+    # Critical #3 — Recover upload state from DB if the session cookie is stale
+    # (e.g. admin closed the tab and came back, or server restarted between upload
+    # and mapping confirmation).  We need upload_id at minimum to find the file.
+    if "headers" not in session and "upload_id" in session:
+        upload_id = session["upload_id"]
+        urow = database.fetchone(
+            "SELECT headers_json, row_count, file_ext, target_event_id FROM upload_sessions WHERE id = ?",
+            (upload_id,),
+        )
+        if urow:
+            try:
+                session["headers"] = json.loads(urow["headers_json"])
+                session["row_count"] = urow["row_count"]
+                session["upload_ext"] = urow["file_ext"]
+                if urow["target_event_id"] and "upload_target_event_id" not in session:
+                    session["upload_target_event_id"] = urow["target_event_id"]
+            except Exception:
+                pass
+
     if "headers" not in session:
+        flash("Upload session not found. Please re-upload your file.", "error")
         return redirect(url_for("index"))
 
     headers: list[str] = session["headers"]
     event_id = session.get("upload_target_event_id") or get_default_or_active_event_id()
-    database = get_db()
     event = database.fetchone("SELECT * FROM events WHERE id = ?", (event_id,))
 
     if request.method == "POST":
@@ -1436,6 +1792,13 @@ def mapping():
         try:
             tmp_path.unlink()
         except OSError:
+            pass
+
+        # Critical #3 — clean up the DB-persisted upload session
+        try:
+            database.execute("DELETE FROM upload_sessions WHERE id = ?", (session.get("upload_id"),))
+            database.commit()
+        except Exception:
             pass
 
         session.pop("upload_id", None)
@@ -1613,8 +1976,11 @@ def api_undo_attendance(event_id, reg_id):
 @require_admin
 def api_revoke_scanner(event_id, device_id):
     """
-    Invalidate a device's token — for a lost or handed-back phone. The device
-    must re-enter the access code to scan again.
+    Invalidate a device's token — for a lost or handed-back phone.
+    High #7: also adds the device_id to blocked_devices so re-authentication
+    with the same device_id is refused even if the volunteer knows the
+    access code. Admins can unblock by deleting the event and recreating,
+    or via direct DB management if a device was mistakenly revoked.
     """
     database = get_db()
     scanner = database.fetchone(
@@ -1630,6 +1996,17 @@ def api_revoke_scanner(event_id, device_id):
         "UPDATE scanners SET token = ?, status = 'revoked', pending_sync_count = 0 WHERE id = ?",
         (f"revoked-{uuid.uuid4()}", scanner["id"]),
     )
+
+    # High #7 — block this device_id from re-joining this event
+    try:
+        database.execute("""
+            INSERT INTO blocked_devices (id, event_id, device_id, blocked_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(event_id, device_id) DO NOTHING
+        """, (str(uuid.uuid4()), event_id, device_id, now_utc_iso()))
+    except Exception:
+        pass  # Already blocked is fine
+
     database.commit()
     return jsonify({"status": "ok", "device_id": device_id, "device_name": scanner["device_name"]}), 200
 

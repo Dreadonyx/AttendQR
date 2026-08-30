@@ -4,6 +4,8 @@ A lightweight Flask companion app to **CertFlow** for QR-based event attendance 
 
 Upload a Google Form response sheet → assign sequential registration IDs → generate QR codes → scan on event day (from several phones at once, online or offline) → export attendance CSV.
 
+> 📖 **Comprehensive System Documentation**: For full architecture diagrams, end-to-end workflows, REST API specifications, schema definitions, and security mechanics, see [PROJECT_INFO.md](PROJECT_INFO.md).
+
 ---
 
 ## Stack
