@@ -1,0 +1,11 @@
+.git
+.venv
+venv
+__pycache__
+.pytest_cache
+attendqr.db*
+uploads
+android-sdk
+android-build
+debug.keystore
+*.idsig

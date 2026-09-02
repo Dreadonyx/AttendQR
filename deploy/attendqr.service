@@ -1,0 +1,21 @@
+[Unit]
+Description=AttendQR Gunicorn service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=attendqr
+Group=attendqr
+WorkingDirectory=/opt/attendqr
+EnvironmentFile=/etc/attendqr/attendqr.env
+ExecStart=/opt/attendqr/.venv/bin/gunicorn --config gunicorn.conf.py app:app
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/attendqr/uploads
+
+[Install]
+WantedBy=multi-user.target

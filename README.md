@@ -21,8 +21,8 @@ Upload a Google Form response sheet → assign sequential registration IDs → g
 | Serving | `gunicorn` in production, Flask dev server locally |
 
 `db.py` abstracts the two backends: app SQL is written once in SQLite dialect and
-`?` placeholders are rewritten to `%s` for PostgreSQL. If a configured
-PostgreSQL connection fails, the app logs a warning and falls back to SQLite.
+`?` placeholders are rewritten to `%s` for PostgreSQL. Development can use
+SQLite; production requires PostgreSQL and fails fast if it cannot connect.
 
 ---
 
@@ -34,7 +34,7 @@ python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 # 2. Install dependencies
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # 3. Configure (see Environment below)
 export ADMIN_PASSWORD='choose-something-strong'
@@ -51,13 +51,39 @@ network). The database is created automatically on first run.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ADMIN_PASSWORD` | *randomly generated, printed to the console at startup* | Password for the admin console |
-| `SECRET_KEY` | *ephemeral random* | Signs session cookies. **Required in production** — without it sessions break on restart and across workers |
-| `DATABASE_URL` | *(unset → SQLite)* | `postgresql://…`. `postgres://` is normalised automatically |
+| `ATTENDQR_ENV` | `development` | Set to `production` for deployed instances. It enables fail-fast checks and secure cookies. |
+| `ADMIN_PASSWORD` | *randomly generated locally* | Admin console password. **Required, at least 12 characters, in production.** |
+| `SECRET_KEY` | *ephemeral random locally* | Signs session cookies. **Required, at least 32 characters, in production.** |
+| `DATABASE_URL` | *(unset → SQLite)* | PostgreSQL connection string. **Required in production.** `postgres://` is normalised automatically. |
 | `PORT` | `5001` | Listen port |
 | `FLASK_DEBUG` | `0` | `1` enables the Werkzeug debugger. **Never in production** — it is remote code execution for anyone who can reach the port |
 | `MAX_UPLOAD_MB` | `10` | Upload size cap |
-| `SESSION_COOKIE_SECURE` | `0` | Set to `1` when serving over HTTPS |
+| `TRUSTED_PROXY_HOPS` | `0` | Set to `1` behind the supplied Nginx reverse proxy. Never enable this without a trusted proxy. |
+| `SESSION_MAX_AGE_HOURS` | `8` | Admin session lifetime (1–24 hours). |
+
+## Production deployment
+
+Use PostgreSQL, HTTPS, Gunicorn and a reverse proxy. Do **not** run Flask's
+development server for an event.
+
+```bash
+cp .env.example /etc/attendqr/attendqr.env
+# Edit the file: generate a random SECRET_KEY, set a strong ADMIN_PASSWORD,
+# and point DATABASE_URL at managed PostgreSQL.
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+ATTENDQR_ENV=production .venv/bin/gunicorn --config gunicorn.conf.py app:app
+```
+
+For a system service, adapt [deploy/attendqr.service](deploy/attendqr.service)
+and set `TRUSTED_PROXY_HOPS=1`. Configure TLS using
+[deploy/nginx.conf](deploy/nginx.conf). The proxy must be the only process
+publicly reachable; Gunicorn should listen only on the private host/network.
+
+The included `Dockerfile` also runs Gunicorn in production mode. Supply the
+three required secrets (`SECRET_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL`) at
+runtime; never bake them into an image or commit a `.env` file.
 
 ---
 

@@ -13,7 +13,7 @@ import re
 import secrets
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -33,6 +33,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import db
 
@@ -42,12 +43,30 @@ import db
 
 app = Flask(__name__)
 
+ENVIRONMENT = os.environ.get("ATTENDQR_ENV", "development").strip().lower()
+if ENVIRONMENT not in {"development", "production"}:
+    raise RuntimeError("ATTENDQR_ENV must be either 'development' or 'production'")
+
+PRODUCTION_MODE = ENVIRONMENT == "production"
 DEBUG_MODE = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
+if PRODUCTION_MODE and DEBUG_MODE:
+    raise RuntimeError("FLASK_DEBUG must be disabled in production")
+
+
+def env_int(name: str, default: int, low: int, high: int) -> int:
+    """Parse a bounded integer before request helpers are available."""
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        value = default
+    return max(low, min(value, high))
 
 # A stable SECRET_KEY is required in production: a predictable key lets anyone
 # forge an admin session cookie. In debug we generate an ephemeral one.
 _secret = os.environ.get("SECRET_KEY", "").strip()
 if not _secret:
+    if PRODUCTION_MODE:
+        raise RuntimeError("SECRET_KEY must be set in production")
     if not DEBUG_MODE:
         print(
             "WARNING: SECRET_KEY is not set. Generating an ephemeral key — "
@@ -55,19 +74,33 @@ if not _secret:
             "across multiple workers. Set SECRET_KEY in production."
         )
     _secret = secrets.token_urlsafe(48)
+elif PRODUCTION_MODE and len(_secret) < 32:
+    raise RuntimeError("SECRET_KEY must be at least 32 characters in production")
 app.secret_key = _secret
 
 # Reject oversized uploads before they are read into memory.
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "10"))
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
-# Session cookie hardening. Secure is opt-in because the app is routinely run
-# over plain HTTP on a LAN; enable it behind TLS.
+# Production cookies are HTTPS-only. Development/LAN use can explicitly opt in
+# with SESSION_COOKIE_SECURE=1 when TLS is available.
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"),
+    SESSION_COOKIE_SECURE=PRODUCTION_MODE or os.environ.get("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=env_int("SESSION_MAX_AGE_HOURS", 8, 1, 24)),
 )
+
+# Trust forwarded client/protocol headers only when the deployment explicitly
+# declares how many proxies sit in front of Gunicorn.
+TRUSTED_PROXY_HOPS = env_int("TRUSTED_PROXY_HOPS", 0, 0, 2)
+if TRUSTED_PROXY_HOPS:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=TRUSTED_PROXY_HOPS,
+        x_proto=TRUSTED_PROXY_HOPS,
+        x_host=TRUSTED_PROXY_HOPS,
+    )
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -79,11 +112,20 @@ ALLOWED_EXTENSIONS = {"csv", "xlsx"}
 # install is never silently wide open.
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
 if not ADMIN_PASSWORD:
+    if PRODUCTION_MODE:
+        raise RuntimeError("ADMIN_PASSWORD must be set in production")
     ADMIN_PASSWORD = secrets.token_urlsafe(9)
     print("=" * 62)
     print(f"  AttendQR admin password (generated): {ADMIN_PASSWORD}")
     print("  Set ADMIN_PASSWORD in the environment to choose your own.")
     print("=" * 62)
+elif PRODUCTION_MODE and len(ADMIN_PASSWORD) < 12:
+    raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters in production")
+
+if PRODUCTION_MODE and not os.environ.get("DATABASE_URL", "").strip():
+    raise RuntimeError("DATABASE_URL (PostgreSQL) must be set in production")
+if PRODUCTION_MODE and not db.IS_POSTGRES:
+    raise RuntimeError("Production requires PostgreSQL support (psycopg2-binary)")
 
 # Brute-force guard for scanner access codes: (ip -> [attempt timestamps])
 AUTH_MAX_ATTEMPTS = 10
@@ -94,6 +136,8 @@ _auth_attempts: Dict[str, List[float]] = {}
 try:
     db.init_db()
 except Exception as _init_err:
+    if PRODUCTION_MODE:
+        raise RuntimeError(f"Database initialization failed: {_init_err}") from _init_err
     print(f"Warning during startup db.init_db(): {_init_err}")
 
 # Admin password — may be updated at runtime via /api/admin/change-password
@@ -128,6 +172,9 @@ def add_cors_and_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=()"
+    if PRODUCTION_MODE:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
@@ -603,7 +650,7 @@ def api_create_event():
     payload = request.get_json(silent=True) or request.form
     name = str(payload.get("name", "")).strip()
     code = str(payload.get("code", "")).strip().upper()
-    access_code = str(payload.get("access_code", "")).strip() or "SCAN123"
+    access_code = str(payload.get("access_code", "")).strip()
     id_prefix = str(payload.get("id_prefix", "")).strip()
     id_width = safe_int(payload.get("id_width", 3), default=3, low=1, high=12)
 
@@ -1885,7 +1932,7 @@ def login():
             clear_auth_failures(bucket)
             session.clear()          # new session id on privilege change
             session["is_admin"] = True
-            session.permanent = False
+            session.permanent = True
             target = request.args.get("next") or url_for("dashboard")
             # Only ever redirect to a path on this site.
             if not target.startswith("/") or target.startswith("//"):
@@ -1920,7 +1967,10 @@ def healthz():
             "time": now_utc_iso(),
         }), 200
     except Exception as exc:
-        return jsonify({"status": "degraded", "error": str(exc)[:200]}), 503
+        body = {"status": "degraded"}
+        if not PRODUCTION_MODE:
+            body["error"] = str(exc)[:200]
+        return jsonify(body), 503
 
 
 # ---------------------------------------------------------------------------

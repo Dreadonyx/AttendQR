@@ -4,6 +4,7 @@ Supports both PostgreSQL (Cloud) and SQLite (Local / Offline / Fallback).
 """
 import json
 import os
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -19,7 +20,10 @@ except ImportError:
     PSYCOPG2_AVAILABLE = False
 
 BASE_DIR = Path(__file__).parent
-SQLITE_DB_PATH = BASE_DIR / "attendqr.db"
+# This override lets automated tests use an isolated SQLite database instead
+# of mutating the operator's live attendance file.  Normal application runs
+# continue to use ``attendqr.db`` beside this module.
+SQLITE_DB_PATH = Path(os.environ.get("ATTENDQR_DB_PATH", BASE_DIR / "attendqr.db"))
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 # Standardize Heroku/Render/Railway postgres:// to postgresql://
@@ -27,6 +31,7 @@ if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql://" + DATABASE_URL[11:]
 
 IS_POSTGRES = bool(DATABASE_URL and PSYCOPG2_AVAILABLE)
+REQUIRE_POSTGRES = os.environ.get("ATTENDQR_ENV", "development").strip().lower() == "production"
 
 pg_pool: Optional[Any] = None
 
@@ -38,6 +43,8 @@ def get_pg_pool():
             from psycopg2.pool import ThreadedConnectionPool
             pg_pool = ThreadedConnectionPool(1, 20, DATABASE_URL)
         except Exception as e:
+            if REQUIRE_POSTGRES:
+                raise RuntimeError(f"Unable to connect to PostgreSQL: {e}") from e
             print(f"Warning: Failed to connect to PostgreSQL ({e}). Falling back to SQLite.")
             IS_POSTGRES = False
     return pg_pool
@@ -275,16 +282,41 @@ def init_db():
 
 
 def _migrate_legacy_data(db: DBWrapper):
-    """Migrate legacy 'roster' table into the 'events' & 'participants' schema if present."""
+    """Migrate legacy 'roster' table into the 'events' & 'participants' schema if present.
+
+    Only creates a default event when a legacy 'roster' table actually exists and
+    contains rows that need a home.  A brand-new database must NOT receive a
+    pre-populated event with a random (unknown) access code — doing so breaks
+    the first-run experience and leaks an unknown credential to the admin.
+    """
     try:
-        # Check if any event exists
+        # Check if legacy 'roster' table exists before doing anything
+        has_roster = False
+        try:
+            if not db.is_postgres:
+                r = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='roster'")
+                has_roster = bool(r)
+            else:
+                r = db.fetchone(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_name='roster' AND table_schema='public'"
+                )
+                has_roster = bool(r)
+        except Exception:
+            pass
+
+        # Nothing to migrate — leave the database empty so the admin starts fresh.
+        if not has_roster:
+            return
+
+        # Check whether a default event already exists
         row = db.fetchone("SELECT COUNT(*) as cnt FROM events")
         event_count = row["cnt"] if row else 0
 
         if event_count == 0:
             default_event_id = "default-event"
             created_at = now_utc_iso()
-            
+
             # Read legacy extra headers if present in settings
             extra_headers_json = "[]"
             try:
@@ -293,8 +325,9 @@ def _migrate_legacy_data(db: DBWrapper):
                     extra_headers_json = setting_row["value"]
             except Exception:
                 pass
-            
-            # Create default event
+
+            # Generate a random access code; the admin must update it after
+            # first sign-in via the event settings page.
             db.execute("""
                 INSERT INTO events (id, name, code, access_code, id_prefix, id_width, extra_headers_json, status, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -303,53 +336,40 @@ def _migrate_legacy_data(db: DBWrapper):
                 default_event_id,
                 "Aazhi CTF 2026",
                 "AAZHI26",
-                "SCAN123",
+                secrets.token_hex(8).upper(),
                 "",
                 3,
                 extra_headers_json,
                 "active",
-                created_at
+                created_at,
             ))
             db.commit()
 
-            # Check if legacy 'roster' table exists
-            has_roster = False
             try:
-                if not db.is_postgres:
-                    r = db.fetchone("SELECT name FROM sqlite_master WHERE type='table' AND name='roster'")
-                    has_roster = bool(r)
-                else:
-                    r = db.fetchone("SELECT table_name FROM information_schema.tables WHERE table_name='roster' AND table_schema='public'")
-                    has_roster = bool(r)
-            except Exception:
-                pass
-
-            if has_roster:
-                try:
-                    roster_rows = db.fetchall("SELECT * FROM roster")
-                    for r in roster_rows:
-                        p_id = str(uuid.uuid4())
-                        db.execute("""
-                            INSERT INTO participants (
-                                id, event_id, reg_id, name, email, department, extra_json, attended, scanned_at, created_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ON CONFLICT DO NOTHING
-                        """, (
-                            p_id,
-                            default_event_id,
-                            r["reg_id"],
-                            r["name"],
-                            r["email"],
-                            r["department"],
-                            r.get("extra_json"),
-                            r.get("attended", 0),
-                            r.get("scanned_at"),
-                            created_at
-                        ))
-                    db.commit()
-                except Exception as e:
-                    print(f"Legacy migration note: {e}")
-                    db.rollback()
+                roster_rows = db.fetchall("SELECT * FROM roster")
+                for r in roster_rows:
+                    p_id = str(uuid.uuid4())
+                    db.execute("""
+                        INSERT INTO participants (
+                            id, event_id, reg_id, name, email, department, extra_json, attended, scanned_at, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT DO NOTHING
+                    """, (
+                        p_id,
+                        default_event_id,
+                        r["reg_id"],
+                        r["name"],
+                        r["email"],
+                        r["department"],
+                        r.get("extra_json"),
+                        r.get("attended", 0),
+                        r.get("scanned_at"),
+                        created_at,
+                    ))
+                db.commit()
+            except Exception as e:
+                print(f"Legacy migration note: {e}")
+                db.rollback()
     except Exception as e:
         print(f"Migration note: {e}")
         db.rollback()
