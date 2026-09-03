@@ -3,15 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AttendQR — Cloud Attendance Dashboard</title>
-  <meta name="description" content="Multi-device live attendance dashboard — monitor multiple mobile scanners in real time." />
+  <title>AttendQR — Live Dashboard</title>
+  <meta name="description" content="Multi-device live attendance dashboard — monitor scanner devices and manage check-ins in real time." />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   <style>
+    /* ── Dashboard container override ── */
+    .dash-container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 3rem;
+    }
+
+    /* ── Buttons not in global CSS ── */
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1.5px solid var(--border);
+    }
+    .btn-ghost:hover {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      border-color: var(--text-muted);
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+      border: none;
+    }
+    .btn-danger:hover { opacity: .88; }
+
+    /* ── Live badge ── */
     .live-badge {
       display: inline-flex;
       align-items: center;
       gap: .35rem;
-      background: rgba(63,185,80,.15);
+      background: rgba(63,185,80,.12);
       color: var(--success);
       font-size: .72rem;
       font-weight: 600;
@@ -19,137 +45,242 @@
       letter-spacing: .06em;
       padding: .25rem .65rem;
       border-radius: 99px;
-      border: 1px solid rgba(63,185,80,.3);
+      border: 1px solid rgba(63,185,80,.25);
     }
-
     .live-dot {
-      width: 7px;
-      height: 7px;
+      width: 7px; height: 7px;
       background: var(--success);
       border-radius: 50%;
       animation: pulse 1.8s ease-in-out infinite;
     }
-
     @keyframes pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
       50%       { opacity: .4; transform: scale(.7); }
     }
 
+    /* ── Event selector bar ── */
     .event-bar {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      gap: 0.75rem;
+      gap: .75rem;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 0.85rem 1.15rem;
+      padding: .85rem 1.15rem;
       margin-bottom: 1.25rem;
     }
-
     .event-info-pills {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: .45rem;
       flex-wrap: wrap;
     }
-
     .pill {
-      font-size: 0.75rem;
-      padding: 0.25rem 0.6rem;
+      font-size: .75rem;
+      padding: .25rem .65rem;
       border-radius: 6px;
-      background: rgba(255,255,255,0.06);
+      background: rgba(255,255,255,.05);
       border: 1px solid var(--border);
       color: var(--text-muted);
       font-family: monospace;
     }
+    .pill strong { color: var(--accent); }
+    .pill strong.code-warn { color: var(--warning); }
 
-    .pill strong {
-      color: var(--accent);
+    /* ── Connect scanner card ── */
+    .connect-code-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .75rem;
+      margin-bottom: 1rem;
     }
+    @media (max-width: 480px) { .connect-code-grid { grid-template-columns: 1fr; } }
 
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .9rem 1.1rem;
+    }
+    .code-block-label {
+      font-size: .7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: var(--text-muted);
+      margin-bottom: .35rem;
+    }
+    .code-block-value {
+      font-size: 1.55rem;
+      font-weight: 700;
+      font-family: monospace;
+      letter-spacing: .06em;
+    }
+    .code-block-value.accent  { color: var(--accent); }
+    .code-block-value.warning { color: var(--warning); }
+
+    .connect-url-row {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      margin-bottom: .85rem;
+    }
+    .connect-url-row code {
+      flex: 1;
+      font-size: .8rem;
+      color: var(--text-muted);
+      background: var(--bg);
+      padding: .4rem .75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .connect-steps {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .8rem 1rem;
+    }
+    .connect-steps-label {
+      font-size: .7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: var(--text-muted);
+      margin-bottom: .5rem;
+    }
+    .connect-steps ol {
+      margin: 0;
+      padding-left: 1.2rem;
+      font-size: .82rem;
+      color: var(--text-muted);
+      line-height: 1.85;
+    }
+    .connect-steps ol strong { color: var(--text); }
+
+    /* ── Scanner chips ── */
     .scanners-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 0.65rem;
-      margin-top: 0.65rem;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: .6rem;
+      margin-top: .65rem;
     }
-
     .scanner-chip {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0.55rem 0.8rem;
-      background: rgba(255,255,255,0.03);
+      padding: .55rem .85rem;
+      background: rgba(255,255,255,.03);
       border: 1px solid var(--border);
       border-radius: 8px;
-      font-size: 0.82rem;
+      font-size: .82rem;
     }
-
     .scanner-status-dot {
-      width: 8px;
-      height: 8px;
+      width: 8px; height: 8px;
       border-radius: 50%;
       display: inline-block;
-      margin-right: 0.35rem;
+      margin-right: .4rem;
+      flex-shrink: 0;
     }
+    .dot-online  { background: var(--success); box-shadow: 0 0 5px var(--success); }
+    .dot-offline { background: var(--text-muted); }
 
-    .dot-online {
-      background: var(--success);
-      box-shadow: 0 0 6px var(--success);
+    /* ── Late reg form ── */
+    .late-reg-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .55rem;
+      align-items: flex-end;
     }
-
-    .dot-offline {
-      background: var(--warning);
+    .late-reg-form input {
+      flex: 1;
+      min-width: 140px;
+      background: var(--bg-input);
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      color: var(--text);
+      padding: .5rem .75rem;
+      font-size: .85rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .2s;
     }
+    .late-reg-form input:focus { border-color: var(--border-focus); }
 
+    /* ── Actions row ── */
     .action-row {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
-      gap: .75rem;
+      gap: .65rem;
       margin-bottom: 1.25rem;
     }
 
-    .late-reg-form {
+    /* ── Dashboard tabs ── */
+    .dash-tabs {
       display: flex;
-      flex-wrap: wrap;
-      gap: 0.6rem;
-      align-items: center;
+      gap: .2rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.25rem;
     }
-
-    .late-reg-form input {
-      flex: 1;
-      min-width: 140px;
-      background: var(--bg-input, #0d1117);
-      border: 1.5px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      padding: 0.5rem 0.75rem;
-      font-size: 0.85rem;
+    .dash-tab {
+      padding: .5rem 1.1rem;
+      font-size: .875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color .15s, border-color .15s;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
       font-family: inherit;
     }
+    .dash-tab:hover  { color: var(--text); }
+    .dash-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-    .late-reg-form input:focus {
-      border-color: var(--accent);
-      outline: none;
+    /* ── Pagination ── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: .35rem;
+      padding: .85rem 0 .25rem;
     }
-
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
+    .pagination button {
+      padding: .3rem .7rem;
+      border-radius: 6px;
+      font-size: .8rem;
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
       color: var(--text-muted);
+      transition: all .15s;
     }
+    .pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .pagination button.current { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+    .pagination button:disabled { opacity: .35; cursor: not-allowed; }
 
-    .empty-state .empty-icon { font-size: 3rem; margin-bottom: .75rem; }
+    /* ── Audit status colours ── */
+    .status-ok     { color: var(--success); }
+    .status-dup    { color: var(--warning); }
+    .status-nf     { color: var(--danger); }
+    .status-undo   { color: var(--text-muted); }
+    .status-manual { color: var(--accent); }
 
-    /* Modals */
+    /* ── Modals ── */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.75);
+      background: rgba(0,0,0,.75);
       backdrop-filter: blur(4px);
       display: flex;
       align-items: center;
@@ -157,7 +288,6 @@
       padding: 1rem;
       z-index: 999;
     }
-
     .modal-box {
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -168,91 +298,83 @@
       max-height: 90vh;
       overflow-y: auto;
     }
+    .modal-box h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: .3rem; }
+    .modal-sub  { font-size: .82rem; color: var(--text-muted); margin-bottom: 1rem; }
 
-    .modal-box h3 { font-size: 1.1rem; margin-bottom: 0.35rem; }
-    .modal-box .modal-sub { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem; }
-
-    .danger-zone {
-      border: 1px solid rgba(248,81,73,0.35);
-      border-radius: 10px;
-      padding: 0.9rem 1.1rem;
-      margin-top: 0.85rem;
-      background: rgba(248,81,73,0.04);
-    }
-
-    .danger-zone h4 {
-      color: var(--danger, #f85149);
-      font-size: 0.85rem;
-      margin-bottom: 0.5rem;
-    }
-
-    /* Dashboard tabs */
-    .dash-tabs {
-      display: flex;
-      gap: 0.25rem;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 1.25rem;
-    }
-
-    .dash-tab {
-      padding: 0.5rem 1.1rem;
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: var(--text-muted);
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-      transition: all 0.15s;
-      background: none;
-      border-top: none;
-      border-left: none;
-      border-right: none;
-      font-family: inherit;
-    }
-
-    .dash-tab:hover { color: var(--text); }
-    .dash-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-    /* Pagination */
-    .pagination {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.4rem;
-      padding: 0.85rem 0 0.25rem;
-    }
-
-    .pagination button {
-      padding: 0.3rem 0.7rem;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-family: inherit;
-      cursor: pointer;
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      color: var(--text-muted);
-      transition: all 0.15s;
-    }
-
-    .pagination button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-    .pagination button.current { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
-    .pagination button:disabled { opacity: 0.35; cursor: not-allowed; }
-
-    /* Audit log status badges */
-    .status-ok     { color: var(--success); }
-    .status-dup    { color: var(--warning); }
-    .status-nf     { color: var(--danger, #f85149); }
-    .status-undo   { color: var(--text-muted); }
-
-    /* Inline alert for modals */
     .modal-alert {
       border-radius: 8px;
-      padding: 0.6rem 0.85rem;
-      font-size: 0.82rem;
-      margin-bottom: 0.85rem;
+      padding: .6rem .85rem;
+      font-size: .82rem;
+      margin-bottom: .85rem;
     }
-    .modal-alert-error   { background: rgba(248,81,73,0.1);  border: 1px solid rgba(248,81,73,0.3); color: #f85149; }
-    .modal-alert-success { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3); color: #3fb950; }
+    .modal-alert-error   { background: rgba(248,81,73,.1);  border: 1px solid rgba(248,81,73,.3); color: #f85149; }
+    .modal-alert-success { background: rgba(63,185,80,.1);  border: 1px solid rgba(63,185,80,.3); color: #3fb950; }
+
+    .danger-zone {
+      border: 1px solid rgba(248,81,73,.3);
+      border-radius: 10px;
+      padding: .9rem 1.1rem;
+      margin-top: .85rem;
+      background: rgba(248,81,73,.04);
+    }
+    .danger-zone h4 { color: var(--danger); font-size: .85rem; margin-bottom: .5rem; }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-muted);
+    }
+    .empty-state .empty-icon { font-size: 2.25rem; margin-bottom: .75rem; }
+
+    /* ── Table action buttons ── */
+    .tbl-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: .22rem .55rem;
+      font-size: .73rem;
+      font-weight: 600;
+      border-radius: 5px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity .15s;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    .tbl-btn:active { opacity: .75; }
+    .tbl-btn-qr {
+      background: transparent;
+      color: var(--accent);
+      border: 1.5px solid rgba(88,166,255,.45);
+    }
+    .tbl-btn-qr:hover { background: rgba(88,166,255,.1); }
+    .tbl-btn-present {
+      background: transparent;
+      color: var(--success);
+      border: 1.5px solid rgba(63,185,80,.45);
+      margin-left: .25rem;
+    }
+    .tbl-btn-present:hover { background: rgba(63,185,80,.1); }
+    .tbl-btn-absent {
+      background: transparent;
+      color: var(--danger);
+      border: 1.5px solid rgba(248,81,73,.45);
+      margin-left: .25rem;
+    }
+    .tbl-btn-absent:hover { background: rgba(248,81,73,.1); }
+
+    /* ── Confirmation info box in modal ── */
+    .confirm-info-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .85rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .confirm-info-label { font-size: .72rem; color: var(--text-muted); margin-bottom: .2rem; }
+    .confirm-info-name  { font-weight: 600; font-size: .95rem; }
+    .confirm-info-reg   { font-size: .82rem; color: var(--accent); font-family: monospace; }
   </style>
 </head>
 <body>
@@ -260,40 +382,40 @@
 <nav>
   <div class="nav-inner">
     <a href="{{ url_for('index') }}" class="nav-brand">
-      <span class="brand-icon">📋</span> AttendQR Cloud
+      <span class="brand-icon" aria-hidden="true">⬡</span> AttendQR
     </a>
     <div class="nav-links">
       <a href="{{ url_for('index') }}">Upload Sheet</a>
       <a href="{{ url_for('dashboard') }}" class="active">Dashboard</a>
       <a href="{{ url_for('scan') }}">Scanner</a>
-      <a href="{{ url_for('download_apk') }}" class="btn btn-outline btn-sm" style="margin-left:0.5rem;">📱 Download APK</a>
-      <button type="button" class="btn btn-outline btn-sm" style="margin-left:0.25rem;" onclick="openModal('modal-change-pw')" title="Change admin password">🔑</button>
-      <form method="POST" action="{{ url_for('logout') }}" style="display:inline;margin-left:0.5rem;">
+      <a href="{{ url_for('download_apk') }}" class="btn btn-outline btn-sm" style="margin-left:.35rem;">Download APK</a>
+      <button type="button" class="btn btn-ghost btn-sm" style="margin-left:.2rem;" onclick="openModal('modal-change-pw')" title="Change admin password">Password</button>
+      <form method="POST" action="{{ url_for('logout') }}" style="display:inline;margin-left:.2rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <button type="submit" class="btn btn-outline btn-sm">Sign Out</button>
+        <button type="submit" class="btn btn-ghost btn-sm">Sign Out</button>
       </form>
     </div>
   </div>
 </nav>
 
-<main class="container">
+<main class="dash-container">
 
-  <!-- Event Selector Header Bar -->
+  <!-- Event Selector Bar -->
   <div class="event-bar">
-    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-      <span style="font-weight:700;font-size:1.05rem;color:var(--text);">
+    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;">
+      <span style="font-weight:700;font-size:1.05rem;">
         {{ active_event['name'] if active_event else 'Default Event' }}
       </span>
       <div class="event-info-pills">
-        <span class="pill">Event Code: <strong>{{ active_event['code'] if active_event else 'AAZHI26' }}</strong></span>
-        <span class="pill">Scanner Code: <strong>{{ active_event['access_code'] if active_event else 'SCAN123' }}</strong></span>
+        <span class="pill">Event Code: <strong>{{ active_event['code'] if active_event else '—' }}</strong></span>
+        <span class="pill">Scanner Code: <strong class="code-warn">{{ active_event['access_code'] if active_event else '—' }}</strong></span>
       </div>
     </div>
 
-    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;">
       <form method="POST" action="" id="switch-event-form" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <select id="event-select" class="form-select" style="padding:0.35rem 0.7rem;font-size:0.82rem;" onchange="switchEvent(this.value)">
+        <select id="event-select" class="form-select" style="padding:.35rem .7rem;font-size:.82rem;" onchange="switchEvent(this.value)">
           {% for ev in events %}
             <option value="{{ ev['id'] }}" {% if active_event and active_event['id'] == ev['id'] %}selected{% endif %}>
               {{ ev['name'] }} ({{ ev['code'] }}){% if ev['status'] == 'archived' %} [archived]{% endif %}
@@ -301,12 +423,10 @@
           {% endfor %}
         </select>
       </form>
-      <!-- Critical #1 — Edit event button -->
-      <button type="button" class="btn btn-outline btn-sm" onclick="openEditEventModal()" title="Edit event settings">✏️ Edit</button>
-      <button type="button" class="btn btn-outline btn-sm" onclick="openNewEventModal()">➕ New</button>
-      <!-- Critical #1 — Archive / Delete event buttons -->
-      <button type="button" class="btn btn-ghost btn-sm" onclick="archiveCurrentEvent()" title="Archive this event (data preserved)">📁 Archive</button>
-      <button type="button" class="btn btn-ghost btn-sm" style="color:var(--danger,#f85149);" onclick="deleteCurrentEvent()" title="Delete event and ALL its data permanently">🗑️ Delete</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="openEditEventModal()">Edit</button>
+      <button type="button" class="btn btn-outline btn-sm" onclick="openNewEventModal()">New Event</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="archiveCurrentEvent()">Archive</button>
+      <button type="button" class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteCurrentEvent()">Delete</button>
     </div>
   </div>
 
@@ -340,71 +460,112 @@
     </div>
   </div>
 
-  <!-- Progress Bar Card -->
-  <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.25rem;">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:.5rem; flex-wrap:wrap;">
-      <span style="font-size:.85rem; color:var(--text-muted);">Live Attendance Progress</span>
-      <span class="live-badge"><span class="live-dot"></span> Real-time Sync</span>
+  <!-- Progress Bar -->
+  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;">
+      <span style="font-size:.85rem;color:var(--text-muted);">Live Attendance Progress</span>
+      <span class="live-badge"><span class="live-dot"></span>Real-time</span>
     </div>
     <div class="progress-wrap" style="margin-top:.75rem;">
       <div class="progress-bar" id="progress-bar" style="width:0%"></div>
     </div>
   </div>
 
-  <!-- Connected Scanners Card -->
-  <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.25rem;">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <div class="card-title" style="margin-bottom:0;">📱 Connected Scanner Devices</div>
-      <span id="active-scanners-count" class="pill" style="color:var(--success);font-weight:600;">0 Scanners Online</span>
+  <!-- Connect Scanner Card -->
+  <div class="card" style="padding:1.25rem;margin-bottom:1.25rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.85rem;">
+      <div class="card-title" style="margin-bottom:0;">Connect Scanner Devices</div>
+    </div>
+    <p style="font-size:.83rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.6;">
+      Open the scanner on any phone or tablet using the web URL, or install the Android APK. Enter the codes below to authenticate.
+    </p>
+
+    <div class="connect-code-grid">
+      <div class="code-block">
+        <div class="code-block-label">Event Code</div>
+        <div class="code-block-value accent" id="cc-event-code">{{ active_event['code'] if active_event else '—' }}</div>
+      </div>
+      <div class="code-block">
+        <div class="code-block-label">Scanner Access Code</div>
+        <div class="code-block-value warning" id="cc-access-code">{{ active_event['access_code'] if active_event else '—' }}</div>
+      </div>
+    </div>
+
+    <div class="connect-url-row">
+      <code id="scanner-url-text">—</code>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="copyScannerUrl(this)">Copy URL</button>
+      <a href="{{ url_for('scan') }}" target="_blank" class="btn btn-outline btn-sm">Open Scanner</a>
+      <a href="{{ url_for('download_apk') }}" class="btn btn-ghost btn-sm">APK</a>
+    </div>
+
+    <div class="connect-steps">
+      <div class="connect-steps-label">How to connect</div>
+      <ol>
+        <li>Open the scanner URL above on the volunteer's phone, or install the APK.</li>
+        <li>Enter the <strong>Event Code</strong> and <strong>Scanner Access Code</strong> shown above.</li>
+        <li>The device will appear in "Connected Devices" below once authenticated.</li>
+        <li>To install APK: allow installation from unknown sources in Android settings first.</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- Connected Devices Card -->
+  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
+      <div class="card-title" style="margin-bottom:0;">Connected Devices</div>
+      <span id="active-scanners-count" class="pill" style="color:var(--success);font-weight:600;border-color:rgba(63,185,80,.25);">0 Online</span>
     </div>
     <div class="scanners-grid" id="scanners-container">
-      <div style="color:var(--text-dim);font-size:0.8rem;padding:0.5rem 0;">No scanner phones connected yet</div>
+      <div style="color:var(--text-dim);font-size:.8rem;padding:.4rem 0;">No devices connected yet.</div>
     </div>
   </div>
 
   <!-- Add Late Registration Card -->
-  <div class="card" style="padding:1rem 1.25rem; margin-bottom:1.25rem;">
-    <div class="card-title" style="margin-bottom:0.6rem;">➕ Add Late Registration</div>
+  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;">
+    <div class="card-title" style="margin-bottom:.75rem;">Add Walk-in Registration</div>
     <form method="POST" action="{{ url_for('api_add_participant', event_id=active_event['id'] if active_event else 'default-event') }}" class="late-reg-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <input type="text" name="name" placeholder="Full Name *" required />
-      <input type="email" name="email" placeholder="Email Address *" required />
-      <input type="text" name="department" placeholder="Department / Branch *" required />
-      <input type="text" name="reg_id" placeholder="Custom ID (optional)" style="max-width:180px;font-family:monospace;" />
-      <button type="submit" class="btn btn-primary btn-sm" style="white-space:nowrap;padding:0.55rem 1rem;">
-        Add + Auto-ID
+      <input type="text"  name="name"       placeholder="Full Name *"        required />
+      <input type="email" name="email"      placeholder="Email Address *"     required />
+      <input type="text"  name="department" placeholder="Department / Branch *" required />
+      <input type="text"  name="reg_id"     placeholder="Custom ID (optional)" style="max-width:180px;font-family:monospace;" />
+      <button type="submit" class="btn btn-primary btn-sm" style="white-space:nowrap;padding:.55rem 1rem;">
+        Add Registration
       </button>
     </form>
   </div>
 
-  <!-- Actions -->
+  <!-- Action Buttons Row -->
   <div class="action-row">
-    <div class="flex gap-2 flex-wrap items-center">
-      <a href="{{ url_for('scan') }}" class="btn btn-success">📷 Open Mobile Scanner</a>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+      <a href="{{ url_for('scan') }}" class="btn btn-success btn-sm">Open Scanner</a>
       <form method="POST" action="{{ url_for('generate_qr_zip', event_id=active_event['id'] if active_event else 'default-event') }}" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <button type="submit" class="btn btn-primary">📦 Download All QRs ZIP</button>
+        <button type="submit" class="btn btn-primary btn-sm">Download QR Pack</button>
       </form>
     </div>
-    <div class="flex gap-2 flex-wrap items-center">
-      <a href="{{ url_for('export_roster', event_id=active_event['id'] if active_event else 'default-event') }}" class="btn btn-outline btn-sm">⬇️ Export Attendance CSV</a>
-      <a href="{{ url_for('api_audit_log_export', event_id=active_event['id'] if active_event else 'default-event') }}" class="btn btn-outline btn-sm">📋 Export Audit Log</a>
-      <a href="{{ url_for('index') }}" class="btn btn-outline btn-sm">⬆️ Upload Sheet</a>
+    <div style="display:flex;gap:.45rem;flex-wrap:wrap;align-items:center;">
+      <a href="{{ url_for('export_roster', event_id=active_event['id'] if active_event else 'default-event') }}" class="btn btn-ghost btn-sm">Export CSV</a>
+      <a href="{{ url_for('api_audit_log_export', event_id=active_event['id'] if active_event else 'default-event') }}" class="btn btn-ghost btn-sm">Export Audit Log</a>
+      <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm">Upload Sheet</a>
     </div>
   </div>
 
   <!-- Tabbed Content: Roster | Audit Log -->
   <div class="card" style="padding:1.25rem;">
     <div class="dash-tabs">
-      <button class="dash-tab active" id="tab-roster-btn" onclick="switchTab('roster')">👥 Roster</button>
-      <button class="dash-tab" id="tab-audit-btn" onclick="switchTab('audit')">📋 Audit Log</button>
+      <button class="dash-tab active" id="tab-roster-btn" onclick="switchTab('roster')">Roster</button>
+      <button class="dash-tab" id="tab-audit-btn" onclick="switchTab('audit')">Audit Log</button>
     </div>
 
     <!-- Roster Tab -->
     <div id="tab-roster">
-      <div style="display:flex;gap:0.6rem;margin-bottom:0.75rem;">
-        <input type="text" id="search" placeholder="Search by name, email, department, ID, scanner device…" autocomplete="off" style="flex:1;" class="form-control" />
-        <button type="button" id="btn-absent-only" class="btn btn-ghost btn-sm" onclick="toggleAbsentOnly()">Absent Only</button>
+      <div style="display:flex;gap:.55rem;margin-bottom:.85rem;align-items:center;">
+        <input type="text" id="search" placeholder="Search by name, email, department, ID, device…"
+               autocomplete="off" style="flex:1;" class="form-control" />
+        <button type="button" id="btn-absent-only" class="btn btn-ghost btn-sm" onclick="toggleAbsentOnly()">
+          Absent Only
+        </button>
       </div>
 
       <div class="table-wrapper">
@@ -417,39 +578,42 @@
               <th>Department</th>
               <th>Status</th>
               <th>Scanned At</th>
-              <th>Scanner Device</th>
-              <th style="width:50px;text-align:center;">QR</th>
+              <th>Device</th>
+              <th style="text-align:center;min-width:100px;">Actions</th>
             </tr>
           </thead>
           <tbody id="roster-body">
             <tr>
-              <td colspan="8" class="text-center text-muted" style="padding:2rem;">Loading participant records…</td>
+              <td colspan="8" class="text-center text-muted" style="padding:2rem;">Loading records…</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <div id="empty-state" class="empty-state" style="display:none;">
-        <div class="empty-icon">📭</div>
+        <div class="empty-icon" aria-hidden="true">&#x25A1;</div>
         <p>No participants found. <a href="{{ url_for('index') }}" style="color:var(--accent)">Upload a sheet</a> to populate this event.</p>
       </div>
 
-      <!-- Pagination controls (shown only when roster has many rows) -->
       <div class="pagination" id="roster-pagination" style="display:none;"></div>
     </div>
 
     <!-- Audit Log Tab -->
     <div id="tab-audit" style="display:none;">
-      <div style="display:flex;gap:0.5rem;margin-bottom:0.85rem;flex-wrap:wrap;align-items:center;">
-        <select id="audit-status-filter" class="form-select" style="font-size:0.82rem;padding:0.35rem 0.6rem;" onchange="loadAuditLog(1)">
+      <div style="display:flex;gap:.5rem;margin-bottom:.85rem;flex-wrap:wrap;align-items:center;">
+        <select id="audit-status-filter" class="form-select" style="font-size:.82rem;padding:.35rem .6rem;width:auto;" onchange="loadAuditLog(1)">
           <option value="">All Statuses</option>
-          <option value="ok">✓ Check-In (ok)</option>
-          <option value="duplicate">⚠ Duplicate</option>
-          <option value="not_found">✗ Not Found</option>
-          <option value="undo">↩ Undo</option>
+          <option value="ok">Check-In</option>
+          <option value="duplicate">Duplicate</option>
+          <option value="not_found">Not Found</option>
+          <option value="undo">Undo</option>
+          <option value="manual_present">Manual — Present</option>
+          <option value="manual_absent">Manual — Absent</option>
         </select>
-        <input type="text" id="audit-device-filter" placeholder="Filter by scanner device…" class="form-control" style="flex:1;min-width:160px;" oninput="clearTimeout(window._adft);window._adft=setTimeout(()=>loadAuditLog(1),400)" />
-        <span id="audit-total-label" style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap;"></span>
+        <input type="text" id="audit-device-filter" placeholder="Filter by device…" class="form-control"
+               style="flex:1;min-width:160px;"
+               oninput="clearTimeout(window._adft);window._adft=setTimeout(()=>loadAuditLog(1),400)" />
+        <span id="audit-total-label" style="font-size:.78rem;color:var(--text-muted);white-space:nowrap;"></span>
       </div>
 
       <div class="table-wrapper">
@@ -459,17 +623,16 @@
               <th>Reg ID</th>
               <th>Name</th>
               <th>Department</th>
-              <th>Scanner Device</th>
+              <th>Device</th>
               <th>Status</th>
               <th>Scanned At</th>
             </tr>
           </thead>
           <tbody id="audit-body">
-            <tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Click the Audit Log tab to load.</td></tr>
+            <tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Select the Audit Log tab to load.</td></tr>
           </tbody>
         </table>
       </div>
-
       <div class="pagination" id="audit-pagination"></div>
     </div>
   </div>
@@ -483,23 +646,24 @@
 <!-- New Event Modal -->
 <div class="modal-overlay" id="modal-new-event" style="display:none;">
   <div class="modal-box">
-    <h3>➕ Create New Event</h3>
-    <p class="modal-sub">Create an isolated event with custom ID format and scanner access code.</p>
+    <h3>Create New Event</h3>
+    <p class="modal-sub">Create an isolated event with a custom ID format and scanner access code.</p>
     <form method="POST" action="{{ url_for('api_create_event') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <div class="form-group" style="margin-bottom:0.75rem;">
+      <div class="form-group" style="margin-bottom:.75rem;">
         <label class="form-label">Event Name *</label>
-        <input type="text" name="name" class="form-control" placeholder="e.g. Aazhi CTF 2027, Workshop" required />
+        <input type="text" name="name" class="form-control" placeholder="e.g. Aazhi CTF 2027" required />
       </div>
-      <div class="form-group" style="margin-bottom:0.75rem;">
-        <label class="form-label">Event Code (Unique) *</label>
-        <input type="text" name="code" class="form-control" placeholder="e.g. AAZHI27, WORKSHOP26" required style="font-family:monospace;text-transform:uppercase;" />
+      <div class="form-group" style="margin-bottom:.75rem;">
+        <label class="form-label">Event Code (unique) *</label>
+        <input type="text" name="code" class="form-control" placeholder="e.g. AAZHI27" required
+               style="font-family:monospace;text-transform:uppercase;" />
       </div>
-      <div class="form-group" style="margin-bottom:0.75rem;">
+      <div class="form-group" style="margin-bottom:.75rem;">
         <label class="form-label">Scanner Access Code *</label>
         <input type="text" name="access_code" class="form-control" value="SCAN123" required />
       </div>
-      <div class="mapping-grid" style="grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:1rem;">
         <div class="form-group">
           <label class="form-label">ID Prefix</label>
           <input type="text" name="id_prefix" class="form-control" placeholder="e.g. AAZHI-" />
@@ -509,7 +673,7 @@
           <input type="number" name="id_width" class="form-control" value="3" min="1" max="10" />
         </div>
       </div>
-      <div style="display:flex;gap:0.5rem;">
+      <div style="display:flex;gap:.5rem;">
         <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeModal('modal-new-event')">Cancel</button>
         <button type="submit" class="btn btn-primary" style="flex:1;">Create Event</button>
       </div>
@@ -517,22 +681,24 @@
   </div>
 </div>
 
-<!-- Critical #1 — Edit Event Modal -->
+<!-- Edit Event Modal -->
 <div class="modal-overlay" id="modal-edit-event" style="display:none;">
   <div class="modal-box">
-    <h3>✏️ Edit Event</h3>
-    <p class="modal-sub">The event code is immutable. Changing the access code will immediately revoke all scanner tokens.</p>
+    <h3>Edit Event Settings</h3>
+    <p class="modal-sub">The event code is immutable. Changing the access code immediately revokes all scanner tokens.</p>
     <div id="edit-event-alert" style="display:none;"></div>
-    <div class="form-group" style="margin-bottom:0.75rem;">
+    <div class="form-group" style="margin-bottom:.75rem;">
       <label class="form-label">Event Name *</label>
       <input type="text" id="edit-name" class="form-control" />
     </div>
-    <div class="form-group" style="margin-bottom:0.75rem;">
+    <div class="form-group" style="margin-bottom:.75rem;">
       <label class="form-label">Scanner Access Code *</label>
       <input type="text" id="edit-access-code" class="form-control" style="font-family:monospace;" />
-      <p style="font-size:0.76rem;color:var(--warning);margin-top:0.3rem;">⚠ Changing this rotates all scanner tokens — volunteers must re-authenticate.</p>
+      <p style="font-size:.76rem;color:var(--warning);margin-top:.3rem;">
+        Changing this rotates all scanner tokens — volunteers must re-authenticate.
+      </p>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:1rem;">
       <div class="form-group">
         <label class="form-label">ID Prefix</label>
         <input type="text" id="edit-prefix" class="form-control" placeholder="e.g. AAZHI-" />
@@ -542,24 +708,24 @@
         <input type="number" id="edit-width" class="form-control" min="1" max="10" />
       </div>
     </div>
-    <div style="display:flex;gap:0.5rem;">
+    <div style="display:flex;gap:.5rem;">
       <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeModal('modal-edit-event')">Cancel</button>
       <button type="button" class="btn btn-primary" style="flex:1;" id="btn-save-event" onclick="saveEditEvent()">Save Changes</button>
     </div>
   </div>
 </div>
 
-<!-- Critical #2 — Change Admin Password Modal -->
+<!-- Change Admin Password Modal -->
 <div class="modal-overlay" id="modal-change-pw" style="display:none;">
   <div class="modal-box">
-    <h3>🔑 Change Admin Password</h3>
-    <p class="modal-sub">The new password is stored in the database and survives server restarts. Must be at least 8 characters.</p>
+    <h3>Change Admin Password</h3>
+    <p class="modal-sub">The new password is stored in the database and survives server restarts. Minimum 8 characters.</p>
     <div id="pw-alert" style="display:none;"></div>
-    <div class="form-group" style="margin-bottom:0.75rem;">
+    <div class="form-group" style="margin-bottom:.75rem;">
       <label class="form-label">Current Password *</label>
       <input type="password" id="pw-current" class="form-control" autocomplete="current-password" />
     </div>
-    <div class="form-group" style="margin-bottom:0.75rem;">
+    <div class="form-group" style="margin-bottom:.75rem;">
       <label class="form-label">New Password *</label>
       <input type="password" id="pw-new" class="form-control" autocomplete="new-password" />
     </div>
@@ -567,28 +733,56 @@
       <label class="form-label">Confirm New Password *</label>
       <input type="password" id="pw-confirm" class="form-control" autocomplete="new-password" />
     </div>
-    <div style="display:flex;gap:0.5rem;">
+    <div style="display:flex;gap:.5rem;">
       <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeModal('modal-change-pw')">Cancel</button>
       <button type="button" class="btn btn-primary" style="flex:1;" id="btn-change-pw" onclick="changePassword()">Update Password</button>
     </div>
   </div>
 </div>
 
+<!-- Set Attendance Confirmation Modal -->
+<div class="modal-overlay" id="modal-set-attendance" style="display:none;">
+  <div class="modal-box">
+    <h3 id="modal-sa-title">Change Attendance Status</h3>
+    <p class="modal-sub" id="modal-sa-sub"></p>
+    <div id="modal-sa-alert" style="display:none;"></div>
+    <div class="confirm-info-box">
+      <div class="confirm-info-label">Participant</div>
+      <div class="confirm-info-name" id="modal-sa-name"></div>
+      <div class="confirm-info-reg"  id="modal-sa-reg"></div>
+    </div>
+    <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:1rem;">
+      This action will be recorded in the audit log.
+    </p>
+    <div style="display:flex;gap:.5rem;">
+      <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeModal('modal-set-attendance')">Cancel</button>
+      <button type="button" class="btn btn-primary" style="flex:1;" id="btn-confirm-sa" onclick="confirmSetAttendance()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- =====================================================================
+     SCRIPTS
+     ===================================================================== -->
 <script>
   const currentEventId = "{{ active_event['id'] if active_event else 'default-event' }}";
-  const CSRF_TOKEN = "{{ csrf_token() }}";
-  let allRows = [];
-  let extraHeaders = [];
-  let searchTerm = '';
-  let showAbsentOnly = false;
-  let rosterCurrentPage = 1;
-  const ROSTER_PAGE_SIZE = 200;  // load in pages of 200; UI search filters client-side
-  let rosterTotalPages = 1;
-  let auditCurrentPage = 1;
-  let auditTotalPages = 1;
-  let activeTab = 'roster';
+  const CSRF_TOKEN     = "{{ csrf_token() }}";
 
-  // ---- Utilities -------------------------------------------------------
+  let allRows          = [];
+  let extraHeaders     = [];
+  let searchTerm       = '';
+  let showAbsentOnly   = false;
+  let rosterCurrentPage = 1;
+  const ROSTER_PAGE_SIZE = 200;
+  let rosterTotalPages   = 1;
+  let auditCurrentPage   = 1;
+  let auditTotalPages    = 1;
+  let activeTab          = 'roster';
+
+  // Pending attendance change state
+  let pendingAttendanceChange = null;
+
+  // ── Utilities ──────────────────────────────────────────────────────────
   function escHtml(s) {
     return String(s || '')
       .replace(/&/g,'&amp;').replace(/</g,'&lt;')
@@ -598,21 +792,26 @@
   function formatTime(iso) {
     if (!iso) return '—';
     try {
-      const d = new Date(iso);
-      return d.toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' });
+      return new Date(iso).toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' });
     } catch { return iso; }
   }
 
-  // ---- Modal helpers ---------------------------------------------------
-  function openModal(id) {
-    document.getElementById(id).style.display = 'flex';
+  // ── Scanner URL display ────────────────────────────────────────────────
+  document.getElementById('scanner-url-text').textContent = window.location.origin + '/scan';
+
+  function copyScannerUrl(btn) {
+    const url = window.location.origin + '/scan';
+    navigator.clipboard.writeText(url).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = orig; }, 1600);
+    }).catch(() => { prompt('Copy this URL:', url); });
   }
 
-  function closeModal(id) {
-    document.getElementById(id).style.display = 'none';
-  }
-
-  function openNewEventModal() { openModal('modal-new-event'); }
+  // ── Modal helpers ──────────────────────────────────────────────────────
+  function openModal(id)  { document.getElementById(id).style.display = 'flex'; }
+  function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+  function openNewEventModal()  { openModal('modal-new-event'); }
   function closeNewEventModal() { closeModal('modal-new-event'); }
 
   function setAlert(alertId, msg, type) {
@@ -623,17 +822,17 @@
     el.style.display = '';
   }
 
-  // ---- Tab switcher ----------------------------------------------------
+  // ── Tab switcher ───────────────────────────────────────────────────────
   function switchTab(tab) {
     activeTab = tab;
     document.getElementById('tab-roster').style.display = tab === 'roster' ? '' : 'none';
-    document.getElementById('tab-audit').style.display = tab === 'audit' ? '' : 'none';
+    document.getElementById('tab-audit').style.display  = tab === 'audit'  ? '' : 'none';
     document.getElementById('tab-roster-btn').classList.toggle('active', tab === 'roster');
-    document.getElementById('tab-audit-btn').classList.toggle('active', tab === 'audit');
+    document.getElementById('tab-audit-btn').classList.toggle('active',  tab === 'audit');
     if (tab === 'audit') loadAuditLog(1);
   }
 
-  // ---- Event switcher --------------------------------------------------
+  // ── Event switcher ─────────────────────────────────────────────────────
   function switchEvent(eventId) {
     if (!eventId) return;
     fetch(`/api/events/${eventId}/select`, {
@@ -642,34 +841,29 @@
     }).then(() => window.location.reload());
   }
 
-  // ---- Critical #1 — Archive event ------------------------------------
+  // ── Archive / Restore event ────────────────────────────────────────────
   async function archiveCurrentEvent() {
     const label = document.getElementById('event-select').selectedOptions[0]?.text || 'this event';
-    const isCurrentlyArchived = label.includes('[archived]');
-    const action = isCurrentlyArchived ? 'restore' : 'archive';
-    if (!confirm(`${action === 'archive' ? 'Archive' : 'Restore'} "${label.replace(' [archived]','')}"?\n\n${action === 'archive' ? 'Archived events are hidden from scanners but data is preserved.' : 'Restoring will make the event active again.'}`)) return;
+    const isArchived = label.includes('[archived]');
+    const action = isArchived ? 'restore' : 'archive';
+    if (!confirm(`${isArchived ? 'Restore' : 'Archive'} "${label.replace(' [archived]','')}"?\n\n${isArchived ? 'Restoring will make the event active again.' : 'Archived events are hidden from scanners but all data is preserved.'}`)) return;
     try {
-      const res = await fetch(`/api/events/${currentEventId}/archive`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': CSRF_TOKEN }
-      });
+      const res  = await fetch(`/api/events/${currentEventId}/archive`, { method:'POST', headers:{'X-CSRF-Token':CSRF_TOKEN} });
       const data = await res.json();
       if (res.ok) window.location.reload();
       else alert(data.message || 'Failed to archive event.');
     } catch(e) { alert('Request failed: ' + e.message); }
   }
 
-  // ---- Critical #1 — Delete event -------------------------------------
+  // ── Delete event ───────────────────────────────────────────────────────
   async function deleteCurrentEvent() {
     const label = document.getElementById('event-select').selectedOptions[0]?.text || 'this event';
-    const confirm1 = confirm(`⚠️ PERMANENTLY DELETE "${label}"?\n\nThis will delete ALL participants, attendance records, scanner tokens, and audit logs for this event.\n\nThis CANNOT be undone. Continue?`);
-    if (!confirm1) return;
-    const confirm2 = confirm(`Last chance — are you absolutely sure you want to delete "${label}" and ALL its data forever?`);
-    if (!confirm2) return;
+    if (!confirm(`PERMANENTLY DELETE "${label}"?\n\nThis will delete ALL participants, attendance records, scanner tokens, and audit logs.\n\nThis CANNOT be undone. Continue?`)) return;
+    if (!confirm(`Last chance — delete "${label}" and ALL its data forever?`)) return;
     try {
-      const res = await fetch(`/api/events/${currentEventId}`, {
-        method: 'DELETE',
-        headers: { 'X-CSRF-Token': CSRF_TOKEN, 'Content-Type': 'application/json' },
+      const res  = await fetch(`/api/events/${currentEventId}`, {
+        method:'DELETE',
+        headers:{'X-CSRF-Token':CSRF_TOKEN,'Content-Type':'application/json'},
         body: JSON.stringify({ confirm: true })
       });
       const data = await res.json();
@@ -678,91 +872,142 @@
     } catch(e) { alert('Request failed: ' + e.message); }
   }
 
-  // ---- High #6 — Edit event -------------------------------------------
+  // ── Edit event ─────────────────────────────────────────────────────────
   function openEditEventModal() {
-    // Pre-fill current event values
-    const pills = document.querySelectorAll('.pill strong');
-    document.getElementById('edit-name').value = "{{ (active_event['name'] if active_event else '') | e }}";
+    document.getElementById('edit-name').value        = "{{ (active_event['name'] if active_event else '') | e }}";
     document.getElementById('edit-access-code').value = "{{ (active_event['access_code'] if active_event else '') | e }}";
-    document.getElementById('edit-prefix').value = "{{ (active_event['id_prefix'] if active_event else '') | e }}";
-    document.getElementById('edit-width').value = "{{ active_event['id_width'] if active_event else 3 }}";
+    document.getElementById('edit-prefix').value      = "{{ (active_event['id_prefix'] if active_event else '') | e }}";
+    document.getElementById('edit-width').value       = "{{ active_event['id_width'] if active_event else 3 }}";
     setAlert('edit-event-alert', '', 'error');
     openModal('modal-edit-event');
   }
 
   async function saveEditEvent() {
-    const btn = document.getElementById('btn-save-event');
-    const name = document.getElementById('edit-name').value.trim();
+    const btn         = document.getElementById('btn-save-event');
+    const name        = document.getElementById('edit-name').value.trim();
     const access_code = document.getElementById('edit-access-code').value.trim();
-    const id_prefix = document.getElementById('edit-prefix').value.trim();
-    const id_width = parseInt(document.getElementById('edit-width').value) || 3;
-    if (!name || !access_code) { setAlert('edit-event-alert', 'Name and access code are required.', 'error'); return; }
+    const id_prefix   = document.getElementById('edit-prefix').value.trim();
+    const id_width    = parseInt(document.getElementById('edit-width').value) || 3;
+    if (!name || !access_code) { setAlert('edit-event-alert','Name and access code are required.','error'); return; }
 
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      const res = await fetch(`/api/events/${currentEventId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+      const res  = await fetch(`/api/events/${currentEventId}`, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
         body: JSON.stringify({ name, access_code, id_prefix, id_width })
       });
       const data = await res.json();
       if (res.ok) {
-        const msg = data.tokens_invalidated
-          ? 'Event updated. All scanner tokens were revoked — volunteers must re-authenticate.'
-          : 'Event updated successfully.';
-        setAlert('edit-event-alert', msg, 'success');
+        setAlert('edit-event-alert',
+          data.tokens_invalidated
+            ? 'Event updated. All scanner tokens were revoked — volunteers must re-authenticate.'
+            : 'Event updated successfully.',
+          'success');
         setTimeout(() => { closeModal('modal-edit-event'); window.location.reload(); }, 1800);
       } else {
         setAlert('edit-event-alert', data.message || 'Failed to update event.', 'error');
       }
-    } catch(e) { setAlert('edit-event-alert', 'Request failed: ' + e.message, 'error'); }
+    } catch(e) { setAlert('edit-event-alert','Request failed: ' + e.message,'error'); }
     finally { btn.disabled = false; btn.textContent = 'Save Changes'; }
   }
 
-  // ---- Critical #2 — Change admin password ----------------------------
+  // ── Change admin password ──────────────────────────────────────────────
   async function changePassword() {
-    const btn = document.getElementById('btn-change-pw');
+    const btn             = document.getElementById('btn-change-pw');
     const current_password = document.getElementById('pw-current').value;
-    const new_password = document.getElementById('pw-new').value;
-    const confirm_pw = document.getElementById('pw-confirm').value;
+    const new_password    = document.getElementById('pw-new').value;
+    const confirm_pw      = document.getElementById('pw-confirm').value;
 
-    if (!current_password || !new_password || !confirm_pw) { setAlert('pw-alert', 'All fields are required.', 'error'); return; }
-    if (new_password !== confirm_pw) { setAlert('pw-alert', 'New passwords do not match.', 'error'); return; }
-    if (new_password.length < 8) { setAlert('pw-alert', 'New password must be at least 8 characters.', 'error'); return; }
+    if (!current_password || !new_password || !confirm_pw) { setAlert('pw-alert','All fields are required.','error'); return; }
+    if (new_password !== confirm_pw)   { setAlert('pw-alert','New passwords do not match.','error'); return; }
+    if (new_password.length < 8)       { setAlert('pw-alert','New password must be at least 8 characters.','error'); return; }
 
     btn.disabled = true; btn.textContent = 'Updating…';
     try {
-      const res = await fetch('/api/admin/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
+      const res  = await fetch('/api/admin/change-password', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
         body: JSON.stringify({ current_password, new_password })
       });
       const data = await res.json();
       if (res.ok) {
-        setAlert('pw-alert', '✓ Password updated successfully.', 'success');
+        setAlert('pw-alert','Password updated successfully.','success');
         document.getElementById('pw-current').value = '';
-        document.getElementById('pw-new').value = '';
+        document.getElementById('pw-new').value     = '';
         document.getElementById('pw-confirm').value = '';
         setTimeout(() => closeModal('modal-change-pw'), 2000);
       } else {
-        setAlert('pw-alert', data.message || 'Failed to update password.', 'error');
+        setAlert('pw-alert', data.message || 'Failed to update password.','error');
       }
-    } catch(e) { setAlert('pw-alert', 'Request failed: ' + e.message, 'error'); }
+    } catch(e) { setAlert('pw-alert','Request failed: ' + e.message,'error'); }
     finally { btn.disabled = false; btn.textContent = 'Update Password'; }
   }
 
-  // ---- Roster helpers --------------------------------------------------
+  // ── Set attendance modal ───────────────────────────────────────────────
+  function openSetAttendanceModal(reg, name, attended) {
+    pendingAttendanceChange = { reg, attended };
+
+    const isMarkingPresent = attended === 1;
+    document.getElementById('modal-sa-title').textContent =
+      isMarkingPresent ? 'Mark as Present' : 'Mark as Absent';
+    document.getElementById('modal-sa-sub').textContent = isMarkingPresent
+      ? `This will manually check in this participant as attended.`
+      : `This will mark this participant as absent and clear their check-in record.`;
+    document.getElementById('modal-sa-name').textContent = name;
+    document.getElementById('modal-sa-reg').textContent  = reg;
+
+    const confirmBtn = document.getElementById('btn-confirm-sa');
+    confirmBtn.style.background = isMarkingPresent ? 'var(--success)' : 'var(--danger)';
+    confirmBtn.style.color      = '#000';
+    confirmBtn.textContent      = 'Confirm';
+    confirmBtn.disabled         = false;
+
+    setAlert('modal-sa-alert','','error');
+    openModal('modal-set-attendance');
+  }
+
+  async function confirmSetAttendance() {
+    if (!pendingAttendanceChange) return;
+    const { reg, attended } = pendingAttendanceChange;
+    const btn = document.getElementById('btn-confirm-sa');
+    btn.disabled = true; btn.textContent = 'Updating…';
+
+    try {
+      const res  = await fetch(
+        `/api/events/${encodeURIComponent(currentEventId)}/participants/${encodeURIComponent(reg)}/set-attendance`,
+        {
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF_TOKEN},
+          body: JSON.stringify({ attended })
+        }
+      );
+      const data = await res.json();
+      if (res.ok) {
+        closeModal('modal-set-attendance');
+        pendingAttendanceChange = null;
+        await fetchStatsAndRoster();
+      } else {
+        setAlert('modal-sa-alert', data.message || 'Request failed.','error');
+        btn.disabled = false; btn.textContent = 'Confirm';
+      }
+    } catch(e) {
+      setAlert('modal-sa-alert','Request failed: ' + e.message,'error');
+      btn.disabled = false; btn.textContent = 'Confirm';
+    }
+  }
+
+  // ── Roster helpers ─────────────────────────────────────────────────────
   function toggleAbsentOnly() {
     showAbsentOnly = !showAbsentOnly;
     const btn = document.getElementById('btn-absent-only');
-    btn.style.color = showAbsentOnly ? 'var(--warning)' : '';
-    btn.style.borderColor = showAbsentOnly ? 'rgba(210,153,34,0.4)' : '';
+    btn.style.color        = showAbsentOnly ? 'var(--warning)' : '';
+    btn.style.borderColor  = showAbsentOnly ? 'rgba(210,153,34,.4)' : '';
     applyFilter();
   }
 
   function buildHeaderRow() {
-    const theadRow = document.getElementById('roster-header-row');
-    theadRow.innerHTML = `
+    document.getElementById('roster-header-row').innerHTML = `
       <th>ID</th>
       <th>Name</th>
       <th>Email</th>
@@ -770,152 +1015,151 @@
       ${extraHeaders.map(h => `<th>${escHtml(h)}</th>`).join('')}
       <th>Status</th>
       <th>Scanned At</th>
-      <th>Scanner Device</th>
-      <th style="width:50px;text-align:center;">QR</th>
+      <th>Device</th>
+      <th style="text-align:center;min-width:100px;">Actions</th>
     `;
   }
 
   function renderTable(rows) {
     const tbody = document.getElementById('roster-body');
     const empty = document.getElementById('empty-state');
-
     if (!rows.length) {
       tbody.innerHTML = '';
       empty.style.display = '';
       return;
     }
-
     empty.style.display = 'none';
     tbody.innerHTML = rows.map(r => `
       <tr>
         <td><code style="font-size:.82rem;color:var(--accent);font-weight:700;">${escHtml(r.reg_id)}</code></td>
         <td><strong>${escHtml(r.name)}</strong></td>
-        <td style="color:var(--text-muted);font-size:.82rem">${escHtml(r.email)}</td>
+        <td style="color:var(--text-muted);font-size:.82rem;">${escHtml(r.email)}</td>
         <td>${escHtml(r.department)}</td>
-        ${extraHeaders.map(h => `<td style="color:var(--text-muted);font-size:.82rem">${escHtml((r.extra && r.extra[h]) ? r.extra[h] : '')}</td>`).join('')}
+        ${extraHeaders.map(h => `<td style="color:var(--text-muted);font-size:.82rem;">${escHtml((r.extra && r.extra[h]) ? r.extra[h] : '')}</td>`).join('')}
         <td>
           ${r.attended
-            ? '<span class="badge badge-success">✓ Present</span>'
+            ? '<span class="badge badge-success">Present</span>'
             : '<span class="badge badge-muted">Absent</span>'}
         </td>
-        <td style="color:var(--text-muted);font-size:.82rem">${formatTime(r.scanned_at)}</td>
+        <td style="color:var(--text-muted);font-size:.82rem;">${formatTime(r.scanned_at)}</td>
         <td style="color:var(--text-dim);font-size:.78rem;font-family:monospace;">${escHtml(r.scanned_by_device_name || '—')}</td>
         <td style="text-align:center;white-space:nowrap;">
-          <a href="/api/events/${encodeURIComponent(currentEventId)}/qr/${encodeURIComponent(r.reg_id)}" class="btn btn-outline btn-sm" title="Download QR for ${escHtml(r.reg_id)}" style="padding:.2rem .5rem;text-decoration:none;font-size:0.75rem;">⬇️</a>
-          ${r.attended ? `<button type="button" class="btn btn-outline btn-sm js-undo" data-reg="${escHtml(r.reg_id)}" data-name="${escHtml(r.name)}" title="Undo check-in" style="padding:.2rem .5rem;font-size:0.75rem;">↩️</button>` : ''}
+          <a href="/api/events/${encodeURIComponent(currentEventId)}/qr/${encodeURIComponent(r.reg_id)}"
+             class="tbl-btn tbl-btn-qr" title="Download QR code">QR</a>
+          ${r.attended
+            ? `<button type="button"
+                 class="tbl-btn tbl-btn-absent js-set-attendance"
+                 data-reg="${escHtml(r.reg_id)}"
+                 data-name="${escHtml(r.name)}"
+                 data-attended="0"
+                 title="Mark as Absent">Mark Absent</button>`
+            : `<button type="button"
+                 class="tbl-btn tbl-btn-present js-set-attendance"
+                 data-reg="${escHtml(r.reg_id)}"
+                 data-name="${escHtml(r.name)}"
+                 data-attended="1"
+                 title="Mark as Present">Mark Present</button>`
+          }
         </td>
       </tr>
     `).join('');
   }
 
-  // High #4 — Roster pagination
+  // ── Roster pagination ──────────────────────────────────────────────────
   function renderRosterPagination(page, totalPages) {
     const container = document.getElementById('roster-pagination');
     if (totalPages <= 1) { container.style.display = 'none'; return; }
     container.style.display = 'flex';
     const pages = [];
-    pages.push(`<button ${page===1?'disabled':''} onclick="loadRosterPage(${page-1})">‹ Prev</button>`);
-    const range = Array.from({length: totalPages}, (_,i) => i+1);
-    for (const p of range) {
-      if (p === 1 || p === totalPages || Math.abs(p - page) <= 2) {
+    pages.push(`<button ${page===1?'disabled':''} onclick="loadRosterPage(${page-1})">Prev</button>`);
+    for (const p of Array.from({length: totalPages}, (_,i) => i+1)) {
+      if (p===1 || p===totalPages || Math.abs(p-page)<=2) {
         pages.push(`<button class="${p===page?'current':''}" onclick="loadRosterPage(${p})">${p}</button>`);
-      } else if (Math.abs(p - page) === 3) {
+      } else if (Math.abs(p-page)===3) {
         pages.push(`<button disabled>…</button>`);
       }
     }
-    pages.push(`<button ${page===totalPages?'disabled':''} onclick="loadRosterPage(${page+1})">Next ›</button>`);
+    pages.push(`<button ${page===totalPages?'disabled':''} onclick="loadRosterPage(${page+1})">Next</button>`);
     container.innerHTML = pages.join('');
   }
 
   function applyFilter() {
     const q = searchTerm.toLowerCase();
     let filtered = allRows;
-
-    if (showAbsentOnly) {
-      filtered = filtered.filter(r => !r.attended);
-    }
-
+    if (showAbsentOnly) filtered = filtered.filter(r => !r.attended);
     if (q) {
       filtered = filtered.filter(r => {
-        const basicMatch = (r.reg_id && r.reg_id.toLowerCase().includes(q)) ||
-                           (r.name && r.name.toLowerCase().includes(q)) ||
-                           (r.email && r.email.toLowerCase().includes(q)) ||
-                           (r.department && r.department.toLowerCase().includes(q)) ||
-                           (r.scanned_by_device_name && r.scanned_by_device_name.toLowerCase().includes(q));
-        if (basicMatch) return true;
-        if (r.extra) {
-          return Object.values(r.extra).some(v => String(v).toLowerCase().includes(q));
-        }
+        const basic = (r.reg_id && r.reg_id.toLowerCase().includes(q)) ||
+                      (r.name   && r.name.toLowerCase().includes(q))   ||
+                      (r.email  && r.email.toLowerCase().includes(q))  ||
+                      (r.department && r.department.toLowerCase().includes(q)) ||
+                      (r.scanned_by_device_name && r.scanned_by_device_name.toLowerCase().includes(q));
+        if (basic) return true;
+        if (r.extra) return Object.values(r.extra).some(v => String(v).toLowerCase().includes(q));
         return false;
       });
     }
-
     renderTable(filtered);
   }
 
-  // ---- Attendance correction & device revocation ----------------------
-  async function postAdmin(url) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'X-CSRF-Token': CSRF_TOKEN, 'Accept': 'application/json' },
-    });
-    let data = {};
-    try { data = await res.json(); } catch (e) {}
-    if (!res.ok) throw new Error(data.message || `Request failed (${res.status})`);
-    return data;
-  }
-
+  // ── Click delegation ───────────────────────────────────────────────────
   document.addEventListener('click', async (e) => {
-    const undoBtn = e.target.closest('.js-undo');
-    if (undoBtn) {
+
+    // Attendance toggle button
+    const saBtn = e.target.closest('.js-set-attendance');
+    if (saBtn) {
       e.preventDefault();
-      const reg = undoBtn.dataset.reg;
-      if (!confirm(`Undo the check-in for ${undoBtn.dataset.name} (${reg})?\n\nThey will be able to scan in again.`)) return;
-      undoBtn.disabled = true;
-      try {
-        await postAdmin(`/api/events/${encodeURIComponent(currentEventId)}/participants/${encodeURIComponent(reg)}/undo`);
-        await fetchStatsAndRoster();
-      } catch (err) {
-        alert(err.message);
-        undoBtn.disabled = false;
-      }
+      openSetAttendanceModal(
+        saBtn.dataset.reg,
+        saBtn.dataset.name,
+        parseInt(saBtn.dataset.attended)
+      );
       return;
     }
 
+    // Revoke scanner device
     const revokeLink = e.target.closest('.js-revoke');
     if (revokeLink) {
       e.preventDefault();
       const device = revokeLink.dataset.device;
-      if (!confirm(`Revoke access for "${revokeLink.dataset.name}"?\n\nThat phone is blocked from re-joining this event even if they know the access code.`)) return;
+      if (!confirm(`Revoke access for "${revokeLink.dataset.name}"?\n\nThis phone will be blocked from re-joining this event even if they know the access code.`)) return;
       try {
         await postAdmin(`/api/events/${encodeURIComponent(currentEventId)}/scanners/${encodeURIComponent(device)}/revoke`);
-      } catch (err) {
-        alert(err.message);
-      }
+      } catch(err) { alert(err.message); }
     }
   });
 
-  // ---- High #4 — Load roster page -------------------------------------
+  async function postAdmin(url) {
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{'X-CSRF-Token':CSRF_TOKEN,'Accept':'application/json'}
+    });
+    let data = {};
+    try { data = await res.json(); } catch(e) {}
+    if (!res.ok) throw new Error(data.message || `Request failed (${res.status})`);
+    return data;
+  }
+
+  // ── Roster page loader ─────────────────────────────────────────────────
   async function loadRosterPage(page) {
     rosterCurrentPage = page;
     try {
-      const url = `/api/events/${currentEventId}/roster?page=${page}&per_page=${ROSTER_PAGE_SIZE}`;
-      const res = await fetch(url);
+      const res = await fetch(`/api/events/${currentEventId}/roster?page=${page}&per_page=${ROSTER_PAGE_SIZE}`);
       if (!res.ok) return;
       const data = await res.json();
-      const newExtraHeaders = data.extra_headers || [];
-      if (JSON.stringify(newExtraHeaders) !== JSON.stringify(extraHeaders)) {
-        extraHeaders = newExtraHeaders;
+      const newHeaders = data.extra_headers || [];
+      if (JSON.stringify(newHeaders) !== JSON.stringify(extraHeaders)) {
+        extraHeaders = newHeaders;
         buildHeaderRow();
       }
       allRows = data.roster || [];
       rosterTotalPages = data.total_pages || 1;
       applyFilter();
       renderRosterPagination(page, rosterTotalPages);
-    } catch(e) { console.error('Roster page fetch error:', e); }
+    } catch(e) { console.error('Roster fetch error:', e); }
   }
 
-  // ---- High #5 — Audit Log --------------------------------------------
+  // ── Audit log loader ───────────────────────────────────────────────────
   async function loadAuditLog(page) {
     auditCurrentPage = page;
     const status = document.getElementById('audit-status-filter').value;
@@ -928,14 +1172,20 @@
       '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Loading…</td></tr>';
 
     try {
-      const res = await fetch(url);
+      const res  = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
       auditTotalPages = data.total_pages || 1;
-      document.getElementById('audit-total-label').textContent = `${data.total.toLocaleString()} total records`;
+      document.getElementById('audit-total-label').textContent = `${data.total.toLocaleString()} records`;
 
-      const statusClass = { ok:'status-ok', duplicate:'status-dup', not_found:'status-nf', undo:'status-undo' };
-      const statusLabel = { ok:'✓ Check-In', duplicate:'⚠ Duplicate', not_found:'✗ Not Found', undo:'↩ Undo' };
+      const statusClass = {
+        ok:'status-ok', duplicate:'status-dup', not_found:'status-nf',
+        undo:'status-undo', manual_present:'status-manual', manual_absent:'status-manual'
+      };
+      const statusLabel = {
+        ok:'Check-In', duplicate:'Duplicate', not_found:'Not Found',
+        undo:'Undo', manual_present:'Manual Present', manual_absent:'Manual Absent'
+      };
 
       if (!data.logs.length) {
         document.getElementById('audit-body').innerHTML =
@@ -948,16 +1198,14 @@
         <tr>
           <td><code style="color:var(--accent);font-size:.82rem;">${escHtml(l.reg_id)}</code></td>
           <td>${escHtml(l.name)}</td>
-          <td style="color:var(--text-muted);font-size:.82rem">${escHtml(l.department)}</td>
-          <td style="font-family:monospace;font-size:.78rem;color:var(--text-dim)">${escHtml(l.device_name)}</td>
-          <td><span class="${statusClass[l.status] || ''}" style="font-weight:600;font-size:.82rem">${statusLabel[l.status] || l.status}</span></td>
-          <td style="color:var(--text-muted);font-size:.82rem">${formatTime(l.scanned_at)}</td>
+          <td style="color:var(--text-muted);font-size:.82rem;">${escHtml(l.department)}</td>
+          <td style="font-family:monospace;font-size:.78rem;color:var(--text-dim);">${escHtml(l.device_name)}</td>
+          <td><span class="${statusClass[l.status] || ''}" style="font-weight:600;font-size:.82rem;">${statusLabel[l.status] || l.status}</span></td>
+          <td style="color:var(--text-muted);font-size:.82rem;">${formatTime(l.scanned_at)}</td>
         </tr>
       `).join('');
 
-      // Audit pagination
       renderAuditPagination(page, auditTotalPages);
-
     } catch(e) { console.error('Audit log fetch error:', e); }
   }
 
@@ -965,91 +1213,95 @@
     const container = document.getElementById('audit-pagination');
     if (totalPages <= 1) { container.innerHTML = ''; return; }
     const pages = [];
-    pages.push(`<button ${page===1?'disabled':''} onclick="loadAuditLog(${page-1})">‹ Prev</button>`);
-    const range = Array.from({length: Math.min(totalPages, 7)}, (_,i) => {
+    pages.push(`<button ${page===1?'disabled':''} onclick="loadAuditLog(${page-1})">Prev</button>`);
+    const window7 = Array.from({length: Math.min(totalPages, 7)}, (_, i) => {
       if (totalPages <= 7) return i+1;
       if (page <= 4) return i+1;
-      if (page >= totalPages - 3) return totalPages - 6 + i;
-      return page - 3 + i;
+      if (page >= totalPages-3) return totalPages-6+i;
+      return page-3+i;
     });
-    for (const p of range) {
+    for (const p of window7) {
       pages.push(`<button class="${p===page?'current':''}" onclick="loadAuditLog(${p})">${p}</button>`);
     }
-    if (totalPages > 7 && range[range.length-1] < totalPages) {
+    if (totalPages > 7 && window7[window7.length-1] < totalPages) {
       pages.push(`<button disabled>…</button>`);
       pages.push(`<button onclick="loadAuditLog(${totalPages})">${totalPages}</button>`);
     }
-    pages.push(`<button ${page===totalPages?'disabled':''} onclick="loadAuditLog(${page+1})">Next ›</button>`);
+    pages.push(`<button ${page===totalPages?'disabled':''} onclick="loadAuditLog(${page+1})">Next</button>`);
     container.innerHTML = pages.join('');
   }
 
-  // ---- Stats polling ---------------------------------------------------
+  // ── Live stats polling ─────────────────────────────────────────────────
   async function fetchStatsAndRoster() {
     try {
-      // 1. Fetch Stats & Scanners
       const statsRes = await fetch(`/api/events/${currentEventId}/stats`);
       if (statsRes.ok) {
         const statsData = await statsRes.json();
-        document.getElementById('stat-total').textContent = statsData.summary.total;
+        document.getElementById('stat-total').textContent    = statsData.summary.total;
         document.getElementById('stat-attended').textContent = statsData.summary.attended;
-        document.getElementById('stat-absent').textContent = statsData.summary.absent;
-        document.getElementById('stat-pct').textContent = statsData.summary.percentage + '%';
-        document.getElementById('progress-bar').style.width = statsData.summary.percentage + '%';
+        document.getElementById('stat-absent').textContent   = statsData.summary.absent;
+        document.getElementById('stat-pct').textContent      = statsData.summary.percentage + '%';
+        document.getElementById('progress-bar').style.width  = statsData.summary.percentage + '%';
 
-        // Render Scanners
+        // Render connected devices
         const scannersContainer = document.getElementById('scanners-container');
         const onlineCount = statsData.scanners.filter(s => s.is_online).length;
-        document.getElementById('active-scanners-count').textContent = `${onlineCount} Scanner${onlineCount === 1 ? '' : 's'} Online`;
+        document.getElementById('active-scanners-count').textContent =
+          `${onlineCount} Online`;
 
         if (!statsData.scanners.length) {
-          scannersContainer.innerHTML = '<div style="color:var(--text-dim);font-size:0.8rem;padding:0.5rem 0;">No scanner devices registered yet</div>';
+          scannersContainer.innerHTML =
+            '<div style="color:var(--text-dim);font-size:.8rem;padding:.4rem 0;">No devices registered yet.</div>';
         } else {
           scannersContainer.innerHTML = statsData.scanners.map(s => `
             <div class="scanner-chip">
-              <div>
+              <div style="display:flex;align-items:center;min-width:0;">
                 <span class="scanner-status-dot ${s.is_online ? 'dot-online' : 'dot-offline'}"></span>
-                <strong>${escHtml(s.device_name)}</strong>
+                <strong style="font-size:.83rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(s.device_name)}</strong>
               </div>
-              <div style="font-size:0.72rem;color:var(--text-muted);">
-                ${s.is_online ? '<span style="color:var(--success)">Online</span>' : 'Offline'}
-                ${s.pending_sync_count > 0 ? ` &middot; <span style="color:var(--warning)">${s.pending_sync_count} pending</span>` : ''}
-                &middot; <a href="#" class="js-revoke" data-device="${escHtml(s.device_id)}" data-name="${escHtml(s.device_name)}" style="color:var(--text-dim);">revoke</a>
+              <div style="font-size:.72rem;color:var(--text-muted);flex-shrink:0;margin-left:.5rem;text-align:right;">
+                <span style="color:${s.is_online ? 'var(--success)' : 'var(--text-dim)'};">
+                  ${s.is_online ? 'Online' : 'Offline'}
+                </span>
+                ${s.pending_sync_count > 0 ? `&middot;<span style="color:var(--warning);"> ${s.pending_sync_count} pending</span>` : ''}
+                &middot;
+                <a href="#" class="js-revoke"
+                   data-device="${escHtml(s.device_id)}"
+                   data-name="${escHtml(s.device_name)}"
+                   style="color:var(--text-dim);">revoke</a>
               </div>
             </div>
           `).join('');
         }
       }
 
-      // 2. Fetch Full Roster (High #4 — paginated fetch)
       if (activeTab === 'roster') {
         await loadRosterPage(rosterCurrentPage);
       }
-
-    } catch (e) {
-      console.error('Data polling error:', e);
-    }
+    } catch(e) { console.error('Data polling error:', e); }
   }
 
+  // ── Search binding ─────────────────────────────────────────────────────
   document.getElementById('search').addEventListener('input', function() {
     searchTerm = this.value;
     applyFilter();
   });
 
-  // Close modals on overlay click
+  // ── Close modals on overlay click ──────────────────────────────────────
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', function(e) {
       if (e.target === this) {
         this.style.display = 'none';
-        // Clear pw fields on close
-        const pwCurrent = document.getElementById('pw-current');
-        if (pwCurrent) { pwCurrent.value = ''; document.getElementById('pw-new').value = ''; document.getElementById('pw-confirm').value = ''; }
+        // Clear password fields on modal close
+        const pwc = document.getElementById('pw-current');
+        if (pwc) { pwc.value=''; document.getElementById('pw-new').value=''; document.getElementById('pw-confirm').value=''; }
       }
     });
   });
 
+  // ── Bootstrap ─────────────────────────────────────────────────────────
   fetchStatsAndRoster();
   setInterval(fetchStatsAndRoster, 3500);
 </script>
-
 </body>
 </html>

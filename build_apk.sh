@@ -22,10 +22,10 @@ echo "==> 2. Linking APK with aapt2..."
 "$BUILD_TOOLS/aapt2" link \
     -I "$PLATFORM" \
     -A "$APP_DIR/src/main/assets" \
-    --min-sdk-version 24 \
+    --min-sdk-version 21 \
     --target-sdk-version 34 \
-    --version-code 1 \
-    --version-name "1.0" \
+    --version-code 2 \
+    --version-name "2.0" \
     --manifest "$MANIFEST" \
     --java "$BUILD_DIR/gen" \
     -o "$BUILD_DIR/app-unsigned.apk" \
@@ -68,6 +68,7 @@ fi
     --ks "$KEYSTORE" \
     --ks-pass pass:android \
     --key-pass pass:android \
+    --min-sdk-version 21 \
     --v1-signing-enabled true \
     --v2-signing-enabled true \
     --v3-signing-enabled true \

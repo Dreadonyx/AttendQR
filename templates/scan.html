@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>AttendQR — Multi-Device Mobile Scanner</title>
-  <meta name="description" content="Cloud-first mobile QR attendance scanner with offline queue and auto-sync." />
+  <title>AttendQR — Mobile Scanner</title>
+  <meta name="description" content="Multi-device mobile QR attendance scanner with local offline and cloud online modes." />
   <meta name="theme-color" content="#0d1117" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -17,15 +17,12 @@
     :root {
       --sat: env(safe-area-inset-top, 0px);
       --sab: env(safe-area-inset-bottom, 0px);
-      --sal: env(safe-area-inset-left, 0px);
-      --sar: env(safe-area-inset-right, 0px);
     }
 
     body {
       overflow-x: hidden;
       background: #0d1117;
       min-height: 100vh;
-      min-height: -webkit-fill-available;
       padding-top: var(--sat);
       padding-bottom: var(--sab);
     }
@@ -36,7 +33,7 @@
       padding: 0.75rem 1rem 2rem;
       display: flex;
       flex-direction: column;
-      gap: 0.85rem;
+      gap: 0.75rem;
     }
 
     .app-header {
@@ -66,20 +63,100 @@
       border: 1px solid var(--border);
       color: var(--text-muted);
       border-radius: 8px;
-      padding: 0.4rem 0.6rem;
-      font-size: 0.85rem;
+      padding: 0.4rem 0.65rem;
+      font-size: 0.8rem;
+      font-weight: 500;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 0.35rem;
       transition: all 0.15s;
+      text-decoration: none;
+      font-family: inherit;
     }
 
     .icon-btn:hover, .icon-btn:active {
       color: var(--accent);
       border-color: var(--accent);
       background: rgba(88,166,255,0.08);
+    }
+
+    /* ── Mode selector bar (Local vs Cloud) ── */
+    .mode-bar {
+      display: flex;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .mode-tab-btn {
+      flex: 1;
+      padding: 0.45rem 0.5rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border-radius: 6px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: center;
+      font-family: inherit;
+    }
+
+    .mode-tab-btn.active {
+      background: var(--accent);
+      color: #000;
+    }
+
+    .local-sheet-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 0.25rem 0.75rem;
+      align-self: flex-start;
+    }
+
+    .status-badge .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 6px var(--success);
+    }
+
+    .status-badge .dot.busy {
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+    }
+
+    .status-badge .dot.offline {
+      background: var(--warning);
+      box-shadow: 0 0 6px var(--warning);
+    }
+
+    .status-badge .dot.error {
+      background: var(--danger);
+      box-shadow: 0 0 6px var(--danger);
     }
 
     .viewfinder-wrap {
@@ -98,153 +175,123 @@
     }
 
     #reader {
-      width: 100% !important;
-      height: 100% !important;
-      border: none !important;
+      width: 100%;
+      height: 100%;
     }
 
     #reader video {
-      width: 100% !important;
-      height: 100% !important;
       object-fit: cover !important;
       border-radius: 14px;
     }
 
     .scanner-laser {
       position: absolute;
+      top: 0;
       left: 10%;
       right: 10%;
       height: 2px;
-      background: linear-gradient(90deg, transparent, var(--accent), var(--accent), transparent);
-      box-shadow: 0 0 12px var(--accent);
-      top: 20%;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: scan-sweep 2.2s ease-in-out infinite;
       z-index: 10;
       pointer-events: none;
-      animation: scanLaser 2.2s ease-in-out infinite alternate;
     }
 
-    @keyframes scanLaser {
-      0%   { top: 15%; opacity: 0.4; }
-      50%  { opacity: 1; }
-      100% { top: 85%; opacity: 0.4; }
+    @keyframes scan-sweep {
+      0%, 100% { top: 12%; }
+      50% { top: 88%; }
     }
 
     .camera-controls {
       display: flex;
-      justify-content: center;
-      gap: 0.6rem;
+      gap: 0.5rem;
     }
 
     .scan-result-card {
-      border-radius: 14px;
-      padding: 1.15rem 1rem;
-      text-align: center;
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
       display: none;
-      animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      flex-direction: column;
+      gap: 0.25rem;
     }
 
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(12px) scale(0.98); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
+    .scan-result-card.visible {
+      display: flex;
     }
 
-    .scan-result-card.visible { display: block; }
-
-    .result-ok {
-      background: rgba(63, 185, 80, 0.16);
-      border: 2px solid var(--success);
-      color: #7ee787;
+    .scan-result-card.result-ok {
+      border-color: var(--success);
+      background: rgba(63,185,80,0.12);
     }
 
-    .result-dup {
-      background: rgba(210, 153, 34, 0.16);
-      border: 2px solid var(--warning);
-      color: #e3b341;
+    .scan-result-card.result-dup {
+      border-color: var(--warning);
+      background: rgba(210,153,34,0.12);
     }
 
-    .result-err {
-      background: rgba(248, 81, 73, 0.16);
-      border: 2px solid var(--danger);
-      color: #ff7b72;
+    .scan-result-card.result-err {
+      border-color: var(--danger);
+      background: rgba(248,81,73,0.12);
     }
 
-    .result-badge {
-      font-size: 2.2rem;
-      line-height: 1;
-      margin-bottom: 0.3rem;
+    .result-status-tag {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
+
+    .result-ok .result-status-tag { color: var(--success); }
+    .result-dup .result-status-tag { color: var(--warning); }
+    .result-err .result-status-tag { color: var(--danger); }
 
     .result-name {
-      font-size: 1.25rem;
+      font-size: 1.15rem;
       font-weight: 700;
       color: var(--text);
-      letter-spacing: -0.2px;
     }
 
     .result-dept {
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       color: var(--text-muted);
-      margin-top: 0.15rem;
     }
 
     .result-msg {
-      font-size: 0.85rem;
-      margin-top: 0.35rem;
-      font-weight: 500;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      margin-top: 0.2rem;
     }
 
     .stats-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 0.65rem 1rem;
-      display: flex;
-      justify-content: space-around;
-      align-items: center;
+      padding: 0.75rem 0.5rem;
     }
 
     .stat-item {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 0.1rem;
     }
 
     .stat-num {
-      font-size: 1.2rem;
+      font-size: 1.35rem;
       font-weight: 700;
+      line-height: 1.1;
     }
 
     .stat-label {
-      font-size: 0.7rem;
+      font-size: 0.68rem;
+      color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
+      letter-spacing: 0.04em;
     }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      align-self: center;
-      background: var(--bg-card);
-      padding: 0.25rem 0.65rem;
-      border-radius: 99px;
-      border: 1px solid var(--border);
-    }
-
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--success);
-    }
-
-    .dot.busy { background: var(--warning); animation: pulse 1s infinite; }
-    .dot.offline { background: var(--warning); }
-    .dot.error { background: var(--danger); }
 
     .recent-section {
       background: var(--bg-card);
@@ -325,30 +372,58 @@
   <!-- Header -->
   <header class="app-header">
     <div class="app-title">
-      <span>📷</span> AttendQR
+      <span aria-hidden="true" style="color:var(--accent);">⬡</span> AttendQR
     </div>
     <div class="header-actions">
       <button type="button" class="icon-btn" id="btn-device-settings" title="Scanner Settings">
-        ⚙️ <span id="hdr-device-name">Scanner-01</span>
+        <span id="hdr-device-name">Settings</span>
       </button>
       <button type="button" class="icon-btn" id="btn-manual" title="Manual ID entry">
-        ⌨️
+        Manual
       </button>
       <a href="{{ url_for('dashboard') }}" class="icon-btn" title="View Dashboard">
-        📊
+        Dashboard
       </a>
     </div>
   </header>
 
+  <!-- 2-Option Mode Switcher: Cloud vs Local -->
+  <div class="mode-bar">
+    <button type="button" class="mode-tab-btn active" id="btn-mode-cloud" onclick="setScannerMode('cloud')">
+      Cloud / Online
+    </button>
+    <button type="button" class="mode-tab-btn" id="btn-mode-local" onclick="setScannerMode('local')">
+      Local (Offline Sheet)
+    </button>
+  </div>
+
+  <!-- Local Sheet Panel (Shown when in Local mode) -->
+  <div class="local-sheet-panel" id="local-sheet-panel" style="display:none;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:0.8rem;font-weight:600;color:var(--text);">Local Sheet Roster</span>
+      <span id="local-roster-count" class="pill" style="font-size:0.72rem;">0 loaded</span>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <input type="file" id="local-sheet-input" accept=".csv,.xlsx" style="display:none;" onchange="handleLocalSheet(event)" />
+      <button type="button" class="btn btn-primary btn-sm" style="flex:1;" onclick="document.getElementById('local-sheet-input').click()">
+        Load .xlsx / .csv
+      </button>
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-export-local" onclick="exportLocalCSV()" style="display:none;">
+        Export CSV
+      </button>
+    </div>
+    <div id="local-sheet-info" style="font-size:0.75rem;color:var(--text-muted);display:none;"></div>
+  </div>
+
   <!-- Status indicator -->
   <div class="status-badge" id="status-badge">
     <span class="dot" id="status-dot"></span>
-    <span id="status-text">Ready &bull; Connected</span>
+    <span id="status-text">Ready — Connected</span>
   </div>
 
   <!-- Offline Pending Queue Banner -->
   <div class="offline-banner" id="offline-banner" style="display:none;">
-    <span id="offline-banner-text">🟠 0 scans pending sync</span>
+    <span id="offline-banner-text">0 scans pending sync</span>
     <button type="button" class="btn btn-outline btn-sm" style="padding:0.15rem 0.45rem;font-size:0.7rem;" onclick="flushOfflineQueue()">Sync Now</button>
   </div>
 
@@ -360,14 +435,14 @@
 
   <!-- Camera Action Buttons -->
   <div class="camera-controls">
-    <button type="button" class="icon-btn" id="btn-flip" title="Switch Camera">
-      🔄 Flip Camera
+    <button type="button" class="icon-btn" id="btn-flip" title="Switch Camera" style="flex:1;">
+      Flip Camera
     </button>
   </div>
 
   <!-- Scan Result Banner -->
   <div class="scan-result-card" id="result-card">
-    <div class="result-badge" id="res-icon">✅</div>
+    <div class="result-status-tag" id="res-status-tag">Status</div>
     <div class="result-name" id="res-name">Participant Name</div>
     <div class="result-dept" id="res-dept">Department</div>
     <div class="result-msg" id="res-msg">Checked in successfully</div>
@@ -407,9 +482,9 @@
 <!-- Device Settings / Login Modal -->
 <div class="modal-backdrop" id="modal-device" style="display:none;">
   <div class="modal-card">
-    <h3 style="margin-bottom:0.4rem;font-size:1.1rem;">⚙️ Scanner Phone Setup</h3>
+    <h3 style="margin-bottom:0.4rem;font-size:1.05rem;">Scanner Setup</h3>
     <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:1rem;">
-      Connect this scanner phone to the central cloud server.
+      Connect this scanner to the central cloud server.
     </p>
     <form id="form-device">
       <div class="form-group" style="margin-bottom:0.65rem;">
@@ -435,7 +510,7 @@
 <!-- Manual ID Entry Modal -->
 <div class="modal-backdrop" id="modal-manual" style="display:none;">
   <div class="modal-card">
-    <h3 style="margin-bottom:0.4rem;font-size:1.1rem;">⌨️ Manual ID Check-In</h3>
+    <h3 style="margin-bottom:0.4rem;font-size:1.05rem;">Manual ID Check-In</h3>
     <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;">
       Enter the participant's Registration ID:
     </p>
@@ -463,6 +538,8 @@
 <script src="{{ url_for('static', filename='audio.js') }}"></script>
 <!-- html5-qrcode library from CDN -->
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<!-- xlsx for local mode -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
   const ACTIVE_EVENT_ID = "{{ active_event['id'] if active_event else 'default-event' }}";
@@ -470,7 +547,10 @@
   const TOKEN_KEY = 'attendqr_scanner_token_' + ACTIVE_EVENT_ID;
   const DEVICE_NAME_KEY = 'attendqr_device_name';
   const DEVICE_ID_KEY = 'attendqr_device_id';
+  const LOCAL_ROSTER_KEY = 'attendqr_local_roster_' + ACTIVE_EVENT_ID;
 
+  let currentMode = 'cloud'; // 'cloud' | 'local'
+  let localRoster = [];
   let processingLock = false;
   let counts = { ok: 0, dup: 0, err: 0 };
   let recentScans = [];
@@ -488,7 +568,7 @@
   const statusDot   = document.getElementById('status-dot');
   const statusText  = document.getElementById('status-text');
   const resultCard  = document.getElementById('result-card');
-  const resIcon     = document.getElementById('res-icon');
+  const resTag      = document.getElementById('res-status-tag');
   const resName     = document.getElementById('res-name');
   const resDept     = document.getElementById('res-dept');
   const resMsg      = document.getElementById('res-msg');
@@ -502,12 +582,89 @@
     laser.style.display = (state === 'ready') ? 'block' : 'none';
   }
 
-  function getOfflineQueue() {
-    try {
-      return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
-    } catch (e) {
-      return [];
+  // ── Mode Switcher ────────────────────────────────────────────────────────
+  function setScannerMode(mode) {
+    currentMode = mode;
+    document.getElementById('btn-mode-cloud').classList.toggle('active', mode === 'cloud');
+    document.getElementById('btn-mode-local').classList.toggle('active', mode === 'local');
+    document.getElementById('local-sheet-panel').style.display = (mode === 'local') ? 'flex' : 'none';
+
+    if (mode === 'local') {
+      loadLocalRoster();
+      setStatus(`Ready — Local Mode (${localRoster.length} loaded)`, 'ready');
+    } else {
+      setStatus('Ready — Cloud Connected', 'ready');
     }
+  }
+
+  function loadLocalRoster() {
+    try {
+      localRoster = JSON.parse(localStorage.getItem(LOCAL_ROSTER_KEY) || '[]');
+    } catch(e) { localRoster = []; }
+    updateLocalRosterUI();
+  }
+
+  function updateLocalRosterUI() {
+    document.getElementById('local-roster-count').textContent = `${localRoster.length} loaded`;
+    document.getElementById('btn-export-local').style.display = localRoster.length > 0 ? '' : 'none';
+  }
+
+  function handleLocalSheet(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (!json || json.length < 2) { alert('No rows found in sheet'); return; }
+
+        const headers = json[0].map(h => String(h || '').trim().toLowerCase());
+        const idIdx = headers.findIndex(h => h.includes('id') || h.includes('reg'));
+        const nameIdx = headers.findIndex(h => h.includes('name'));
+        const deptIdx = headers.findIndex(h => h.includes('dept') || h.includes('branch') || h.includes('college'));
+
+        localRoster = [];
+        for (let i = 1; i < json.length; i++) {
+          const row = json[i];
+          if (!row || row.length === 0) continue;
+          const regId = (idIdx !== -1 && row[idIdx]) ? String(row[idIdx]).trim() : String(i).padStart(3, '0');
+          const name = (nameIdx !== -1 && row[nameIdx]) ? String(row[nameIdx]).trim() : `Attendee ${i}`;
+          const dept = (deptIdx !== -1 && row[deptIdx]) ? String(row[deptIdx]).trim() : '';
+          localRoster.push({ reg_id: regId, name: name, department: dept, attended: false, scanned_at: null });
+        }
+
+        localStorage.setItem(LOCAL_ROSTER_KEY, JSON.stringify(localRoster));
+        updateLocalRosterUI();
+        document.getElementById('local-sheet-info').textContent = `Loaded ${localRoster.length} participants from ${file.name}`;
+        document.getElementById('local-sheet-info').style.display = '';
+        setStatus(`Ready — Local Mode (${localRoster.length} loaded)`, 'ready');
+      } catch(err) {
+        alert('Failed to read file: ' + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function exportLocalCSV() {
+    if (!localRoster.length) { alert('No roster loaded'); return; }
+    let csv = 'Registration ID,Name,Department,Attended,Scanned At\n';
+    localRoster.forEach(r => {
+      csv += `"${r.reg_id}","${(r.name||'').replace(/"/g,'""')}","${(r.department||'').replace(/"/g,'""')}","${r.attended ? 'Yes' : 'No'}","${r.scanned_at || ''}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `local_attendance_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  }
+
+  // ── Offline Queue ────────────────────────────────────────────────────────
+  function getOfflineQueue() {
+    try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); }
+    catch (e) { return []; }
   }
 
   function saveOfflineQueue(queue) {
@@ -521,15 +678,16 @@
     const bannerText = document.getElementById('offline-banner-text');
     if (q.length > 0) {
       banner.style.display = 'flex';
-      bannerText.textContent = `🟠 Offline — ${q.length} scan${q.length === 1 ? '' : 's'} pending sync`;
+      bannerText.textContent = `${q.length} scan${q.length === 1 ? '' : 's'} pending sync`;
     } else {
       banner.style.display = 'none';
     }
   }
 
-  function showResult(type, icon, name, dept, msg, id) {
+  // ── Scan Result Card ─────────────────────────────────────────────────────
+  function showResult(type, tag, name, dept, msg, id) {
     resultCard.className = 'scan-result-card visible ' + (type === 'ok' ? 'result-ok' : (type === 'duplicate' ? 'result-dup' : 'result-err'));
-    resIcon.textContent = icon;
+    resTag.textContent  = tag;
     resName.textContent = name || 'Unknown ID';
     resDept.textContent = dept || '';
     resMsg.textContent  = msg || '';
@@ -543,7 +701,7 @@
     playBeep(type);
 
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    recentScans.unshift({ type, name: name || id, time: timeStr });
+    recentScans.unshift({ type, tag, name: name || id, time: timeStr });
     if (recentScans.length > 8) recentScans.pop();
     renderRecent();
   }
@@ -557,7 +715,7 @@
     if (!recentScans.length) return;
     recentList.innerHTML = recentScans.map(s => `
       <div class="recent-item">
-        <span>${s.type === 'ok' ? '✅' : (s.type === 'duplicate' ? '⚠️' : '❌')} <strong>${esc(s.name)}</strong></span>
+        <span><strong>${esc(s.name)}</strong> <small style="color:var(--text-dim)">[${esc(s.tag)}]</small></span>
         <span style="color:var(--text-dim);font-size:0.75rem;">${s.time}</span>
       </div>
     `).join('');
@@ -567,15 +725,23 @@
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
+  // ── Process Scan ─────────────────────────────────────────────────────────
   async function processRegId(rawId) {
     if (processingLock) return;
     processingLock = true;
-    setStatus('Verifying roster…', 'busy');
+    setStatus('Verifying…', 'busy');
 
     const regId = String(rawId).trim();
     const scanId = 'scan_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
     const nowIso = new Date().toISOString();
 
+    if (currentMode === 'local') {
+      // Local mode processing
+      processLocalScan(regId, nowIso);
+      return;
+    }
+
+    // Cloud mode processing
     try {
       const headers = {
         'Content-Type': 'application/json',
@@ -601,45 +767,79 @@
       if (data.status === 'ok') {
         counts.ok++;
         document.getElementById('cnt-ok').textContent = counts.ok;
-        showResult('ok', '✅', data.name, data.department, `✓ Checked in (${regId})`, regId);
+        showResult('ok', 'Checked In', data.name, data.department, `Registered (${regId})`, regId);
       } else if (data.status === 'duplicate') {
         counts.dup++;
         document.getElementById('cnt-dup').textContent = counts.dup;
-        showResult('duplicate', '⚠️', data.name, data.department, `Already present (by ${data.scanner || 'scanner'})`, regId);
+        showResult('duplicate', 'Duplicate', data.name, data.department, `Already present (by ${data.scanner || 'scanner'})`, regId);
       } else {
         counts.err++;
         document.getElementById('cnt-err').textContent = counts.err;
-        showResult('notfound', '❌', regId, '', 'Not found in event roster', regId);
+        showResult('notfound', 'Not Found', regId, '', 'Not in event roster', regId);
       }
 
-      setStatus('Ready &bull; Connected', 'ready');
-      // If we are online, check if any pending queue needs syncing
+      setStatus('Ready — Connected', 'ready');
       flushOfflineQueue();
 
     } catch (e) {
-      // Offline fallback: store in persistent queue
+      // Offline fallback: queue locally
       const queue = getOfflineQueue();
       queue.push({ scan_id: scanId, reg_id: regId, scanned_at: nowIso });
       saveOfflineQueue(queue);
 
       counts.ok++;
       document.getElementById('cnt-ok').textContent = counts.ok;
-      showResult('ok', '🟠', `ID: ${regId}`, '', 'Queued locally (Offline)', regId);
-      setStatus('Offline &bull; Queueing', 'offline');
+      showResult('ok', 'Queued Offline', `ID: ${regId}`, '', 'Queued locally — will sync when reconnected', regId);
+      setStatus('Offline — Queueing', 'offline');
     }
 
     setTimeout(() => {
       hideResult();
       processingLock = false;
       const q = getOfflineQueue();
-      if (q.length > 0) setStatus('Offline &bull; Queueing', 'offline');
-      else setStatus('Ready &bull; Connected', 'ready');
+      if (q.length > 0) setStatus('Offline — Queueing', 'offline');
+      else setStatus('Ready — Connected', 'ready');
+    }, 1600);
+  }
+
+  function processLocalScan(regId, nowIso) {
+    if (!localRoster.length) {
+      counts.err++;
+      document.getElementById('cnt-err').textContent = counts.err;
+      showResult('notfound', 'No Roster', regId, '', 'Load an Excel/CSV sheet first', regId);
+      setTimeout(() => { hideResult(); processingLock = false; }, 1600);
+      return;
+    }
+
+    const attendee = localRoster.find(r => String(r.reg_id).trim().toLowerCase() === regId.toLowerCase());
+    if (!attendee) {
+      counts.err++;
+      document.getElementById('cnt-err').textContent = counts.err;
+      showResult('notfound', 'Not Found', regId, '', 'Not found in local sheet', regId);
+    } else if (attendee.attended) {
+      counts.dup++;
+      document.getElementById('cnt-dup').textContent = counts.dup;
+      showResult('duplicate', 'Duplicate', attendee.name, attendee.department, 'Already marked present', regId);
+    } else {
+      attendee.attended = true;
+      attendee.scanned_at = nowIso;
+      counts.ok++;
+      document.getElementById('cnt-ok').textContent = counts.ok;
+      showResult('ok', 'Checked In', attendee.name, attendee.department, `Marked present locally (${regId})`, regId);
+      localStorage.setItem(LOCAL_ROSTER_KEY, JSON.stringify(localRoster));
+      updateLocalRosterUI();
+    }
+
+    setTimeout(() => {
+      hideResult();
+      processingLock = false;
+      setStatus(`Ready — Local Mode (${localRoster.length} loaded)`, 'ready');
     }, 1600);
   }
 
   async function flushOfflineQueue() {
     const queue = getOfflineQueue();
-    if (!queue.length) return;
+    if (queue.length === 0) return;
 
     try {
       const headers = { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' };
@@ -656,58 +856,38 @@
       });
 
       if (res.ok) {
-        saveOfflineQueue([]);
-        setStatus('Ready &bull; Connected', 'ready');
+        localStorage.removeItem(QUEUE_KEY);
+        updateQueueUI();
+        setStatus('Ready — Connected', 'ready');
       }
-    } catch (e) {
-      console.log('Sync retry delayed, device still offline');
+    } catch(e) {}
+  }
+
+  // ── Camera Initialization ────────────────────────────────────────────────
+  function startScanner(facingMode) {
+    if (html5QrCode) {
+      html5QrCode.stop().then(() => initReader(facingMode)).catch(() => initReader(facingMode));
+    } else {
+      initReader(facingMode);
     }
   }
 
-  // Heartbeat loop
-  setInterval(async () => {
-    if (!scannerToken) return;
-    const q = getOfflineQueue();
-    try {
-      await fetch(`/api/events/${ACTIVE_EVENT_ID}/heartbeat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + scannerToken,
-          'Bypass-Tunnel-Reminder': 'true'
-        },
-        body: JSON.stringify({ pending_count: q.length, status: 'online' })
-      });
-      if (q.length > 0) flushOfflineQueue();
-    } catch (e) {}
-  }, 25000);
-
-  // Camera start / switch
-  async function startScanner(facingMode) {
-    try {
-      if (html5QrCode && html5QrCode.isScanning) await html5QrCode.stop();
-    } catch (e) {}
-
+  function initReader(facingMode) {
     html5QrCode = new Html5Qrcode("reader");
     const config = {
-      fps: 18,
-      qrbox: (w, h) => {
-        const edge = Math.floor(Math.min(w, h) * 0.75);
-        return { width: edge, height: edge };
-      },
-      aspectRatio: 1.0,
-      disableFlip: false,
+      fps: 15,
+      qrbox: { width: 250, height: 250 },
+      aspectRatio: 1.0
     };
 
     html5QrCode.start(
       { facingMode: facingMode },
       config,
-      (decodedText) => processRegId(decodedText),
+      (decodedText) => { processRegId(decodedText); },
       () => {}
-    ).then(() => {
-      setStatus('Ready &bull; Connected', 'ready');
-    }).catch(err => {
-      setStatus('Camera error: ' + err, 'error');
+    ).catch(err => {
+      console.warn("Camera init error:", err);
+      setStatus("Camera Access Required", "error");
     });
   }
 
@@ -716,56 +896,49 @@
     startScanner(currentFacingMode);
   });
 
-  // Modal Handlers
-  const modalManual = document.getElementById('modal-manual');
-  const manualInput = document.getElementById('manual-id-input');
-
   document.getElementById('btn-manual').addEventListener('click', () => {
-    modalManual.style.display = 'flex';
-    manualInput.focus();
+    document.getElementById('modal-manual').style.display = 'flex';
+    document.getElementById('manual-id-input').focus();
   });
 
   document.getElementById('btn-close-modal').addEventListener('click', () => {
-    modalManual.style.display = 'none';
+    document.getElementById('modal-manual').style.display = 'none';
   });
 
   document.getElementById('form-manual').addEventListener('submit', (e) => {
     e.preventDefault();
-    const id = manualInput.value.trim();
-    if (id) {
-      modalManual.style.display = 'none';
-      manualInput.value = '';
-      processRegId(id);
-    }
+    const id = document.getElementById('manual-id-input').value;
+    document.getElementById('modal-manual').style.display = 'none';
+    document.getElementById('manual-id-input').value = '';
+    processRegId(id);
   });
 
-  // Device Setup Form
-  const modalDevice = document.getElementById('modal-device');
   document.getElementById('btn-device-settings').addEventListener('click', () => {
-    modalDevice.style.display = 'flex';
+    document.getElementById('modal-device').style.display = 'flex';
   });
 
   document.getElementById('btn-close-device').addEventListener('click', () => {
-    modalDevice.style.display = 'none';
+    document.getElementById('modal-device').style.display = 'none';
   });
 
   document.getElementById('form-device').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const evCode = document.getElementById('cfg-event-code').value.trim().toUpperCase();
-    const accCode = document.getElementById('cfg-access-code').value.trim();
+    const eventCode = document.getElementById('cfg-event-code').value.trim().toUpperCase();
+    const accessCode = document.getElementById('cfg-access-code').value.trim();
     const devName = document.getElementById('cfg-device-name').value.trim();
 
     try {
       const res = await fetch('/api/auth/scanner', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          event_code: evCode,
-          access_code: accCode,
+          event_code: eventCode,
+          access_code: accessCode,
           device_id: deviceId,
           device_name: devName
         })
       });
+
       const data = await res.json();
       if (res.ok && data.token) {
         scannerToken = data.token;
@@ -773,8 +946,8 @@
         localStorage.setItem(TOKEN_KEY, scannerToken);
         localStorage.setItem(DEVICE_NAME_KEY, deviceName);
         document.getElementById('hdr-device-name').textContent = deviceName;
-        modalDevice.style.display = 'none';
-        alert(`Connected as '${deviceName}' for event ${evCode}!`);
+        document.getElementById('modal-device').style.display = 'none';
+        setStatus('Connected to ' + (data.event.name || eventCode), 'ready');
       } else {
         alert(data.message || 'Authentication failed');
       }
@@ -783,10 +956,7 @@
     }
   });
 
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js').catch(() => {});
-  }
-
+  // Start scanner on load
   window.addEventListener('DOMContentLoaded', () => {
     updateQueueUI();
     startScanner(currentFacingMode);

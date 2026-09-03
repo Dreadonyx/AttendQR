@@ -17,6 +17,8 @@ instance/
 android-sdk/
 android-build/
 *.apk
+!AttendQR.apk
+!static/AttendQR.apk
 *.aab
 *.jks
 *.keystore

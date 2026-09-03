@@ -2027,6 +2027,70 @@ def api_undo_attendance(event_id, reg_id):
     }), 200
 
 
+@app.route("/api/events/<event_id>/participants/<reg_id>/set-attendance", methods=["POST"])
+@require_admin
+def api_set_attendance(event_id, reg_id):
+    """
+    Manually override attendance status for a participant from the admin dashboard.
+    attended=1 marks them as manually checked-in by admin.
+    attended=0 clears their check-in record (same effect as undo).
+    """
+    data = request.get_json(silent=True) or {}
+    attended_val = data.get("attended")
+    if attended_val not in (0, 1, True, False):
+        return jsonify({"status": "error", "message": "attended must be 0 or 1"}), 400
+    attended_int = int(bool(attended_val))
+
+    database = get_db()
+    part = database.fetchone(
+        "SELECT * FROM participants WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)",
+        (event_id, reg_id),
+    )
+    if not part:
+        return jsonify({"status": "not_found", "message": "Participant not found in this event"}), 404
+
+    if part["attended"] == attended_int:
+        return jsonify({"status": "noop", "message": "No change needed", "reg_id": part["reg_id"]}), 200
+
+    ts_now = now_utc_iso()
+    if attended_int == 1:
+        database.execute("""
+            UPDATE participants
+            SET attended = 1, scanned_at = ?, scanned_by_device_id = ?,
+                scanned_by_device_name = ?, scan_id = ?
+            WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)
+        """, (ts_now, "admin-console", "Admin Console", str(uuid.uuid4()), event_id, reg_id))
+        audit_status = "manual_present"
+    else:
+        database.execute("""
+            UPDATE participants
+            SET attended = 0, scanned_at = NULL, scanned_by_device_id = NULL,
+                scanned_by_device_name = NULL, scan_id = NULL
+            WHERE event_id = ? AND LOWER(reg_id) = LOWER(?)
+        """, (event_id, reg_id))
+        audit_status = "manual_absent"
+
+    database.execute("""
+        INSERT INTO attendance_logs
+            (id, event_id, participant_id, reg_id, device_id, device_name, scan_id, status, scanned_at, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        str(uuid.uuid4()), event_id, part["id"], part["reg_id"],
+        "admin-console", "Admin Console", str(uuid.uuid4()),
+        audit_status, ts_now, ts_now,
+    ))
+    database.commit()
+
+    label = "present" if attended_int else "absent"
+    return jsonify({
+        "status": "ok",
+        "reg_id": part["reg_id"],
+        "name": part["name"],
+        "attended": attended_int,
+        "message": f"Participant manually marked {label} by admin",
+    }), 200
+
+
 @app.route("/api/events/<event_id>/scanners/<device_id>/revoke", methods=["POST"])
 @require_admin
 def api_revoke_scanner(event_id, device_id):

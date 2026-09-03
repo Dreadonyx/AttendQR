@@ -380,6 +380,36 @@ class TestUndoAttendance:
         assert res.status_code == 200
         assert res.get_json()["status"] == "noop"
 
+    def test_admin_can_manually_mark_present_and_absent(self, admin):
+        event_id, _c, _a = make_event(admin)
+        reg_id = add_participant(admin, event_id)
+
+        # Mark present
+        res = admin.post(f"/api/events/{event_id}/participants/{reg_id}/set-attendance", json={"attended": 1})
+        assert res.status_code == 200
+        assert res.get_json()["status"] == "ok"
+        assert res.get_json()["attended"] == 1
+
+        # Check roster
+        roster = admin.get(f"/api/events/{event_id}/roster").get_json()["roster"]
+        assert roster[0]["attended"] == 1
+
+        # Mark absent
+        res2 = admin.post(f"/api/events/{event_id}/participants/{reg_id}/set-attendance", json={"attended": 0})
+        assert res2.status_code == 200
+        assert res2.get_json()["status"] == "ok"
+        assert res2.get_json()["attended"] == 0
+
+        # Check roster again
+        roster2 = admin.get(f"/api/events/{event_id}/roster").get_json()["roster"]
+        assert roster2[0]["attended"] == 0
+
+    def test_set_attendance_requires_admin(self, anon, admin):
+        event_id, _c, _a = make_event(admin)
+        reg_id = add_participant(admin, event_id)
+        res = anon.post(f"/api/events/{event_id}/participants/{reg_id}/set-attendance", json={"attended": 1})
+        assert res.status_code in (401, 302)
+
 
 class TestParticipantCreation:
     def test_form_post_with_blank_field_returns_400_not_500(self, admin):
