@@ -103,8 +103,13 @@ if TRUSTED_PROXY_HOPS:
     )
 
 BASE_DIR = Path(__file__).parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+_upload_env = os.environ.get("ATTENDQR_UPLOAD_DIR", "").strip()
+UPLOAD_DIR = Path(_upload_env) if _upload_env else BASE_DIR / "uploads"
+try:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except PermissionError:
+    UPLOAD_DIR = Path("/tmp/attendqr_uploads")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"csv", "xlsx"}
 
